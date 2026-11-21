@@ -51,8 +51,9 @@ npm run build
 | `mc_data_query` | Read-only digest / registry / tag / recipe queries over the cached dump | no process, <1k tokens for 50 rows |
 
 The panel is a right-sidebar **Data** tab (opened from a header button): read-only table, search,
-export and paging over the host's `/atlas/api`, sharing the same facade as the tools. Humans browse
-the same file the model only sees summaries of.
+export and paging over the host's `/atlas/api`, sharing the same facade as the tools. It follows the
+**current session's** workspace, offers a project picker when there are several, and the header button
+stays hidden when the workspace has no nearby Minecraft project.
 
 Both tools are mounted per step: they only appear when the workspace actually contains a Gradle project.
 

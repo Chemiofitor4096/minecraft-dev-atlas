@@ -294,3 +294,49 @@ test('自定义 taskPath 会被校验并传下去', async (t) => {
     (error) => error.code === 'BAD_REQUEST',
   )
 })
+
+test('工作区根不是工程时：用 ctx.mcdev.projects 落到唯一的可导出工程', async (t) => {
+  const { project, logDir, fake, deps } = await setup(t)
+  fake.setLaunch(writingLaunch(logDir))
+  const workspace = await tempDir(t, 'atlas-workspace-')
+  fake.setProjects(async () => ({
+    root: workspace,
+    projects: [
+      {
+        root: project,
+        name: 'Test',
+        kind: 'mod',
+        loader: 'neoforge',
+        runTargets: [{ taskPath: 'runServer', kind: 'server', mode: 'daemon' }],
+      },
+    ],
+  }))
+
+  const value = await exportDump(deps, { workspace })
+  assert.equal(value.cached, false)
+  assert.equal(fake.launchCalls[0].root, project)
+  assert.equal(fake.launchCalls[0].taskPath, 'runServer')
+})
+
+test('工作区里有多个可导出工程 → NO_RUN_TARGET 并列出候选', async (t) => {
+  const { project, fake, deps } = await setup(t)
+  const workspace = await tempDir(t, 'atlas-workspace-')
+  fake.setProjects(async () => ({
+    root: workspace,
+    projects: [
+      { root: project, name: 'A', kind: 'mod', loader: 'neoforge', runTargets: [{ taskPath: 'runServer', kind: 'server' }] },
+      { root: join(workspace, 'other'), name: 'B', kind: 'mod', loader: 'fabric', runTargets: [{ taskPath: ':other:runServer', kind: 'server' }] },
+    ],
+  }))
+
+  await assert.rejects(
+    () => exportDump(deps, { workspace }),
+    (error) => {
+      assert.equal(error.code, 'NO_RUN_TARGET')
+      assert.match(error.message, /多个可导出的工程/)
+      assert.match(error.message, /other/)
+      return true
+    },
+  )
+  assert.equal(fake.launchCalls.length, 0)
+})

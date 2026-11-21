@@ -111,7 +111,7 @@ export function apply(ctx) {
   const atlas = createAtlas({ mcdev, version: VERSION })
   applyTools(ctx, { atlas })
 
-  const panel = createPanelApi({ atlas, defaultRoot: () => defaultWorkspace(ctx) })
+  const panel = createPanelApi({ atlas, mcdev, defaultRoot: () => defaultWorkspace(ctx) })
 
   // webServer 是可选的：纯 CLI / headless profile 里没有它，这时工具照常可用，只是没有面板路由。
   ctx.effect(() => {

@@ -18,13 +18,26 @@ function svg(size, children) {
   )
 }
 
-/** 数据面板：2×2 的格子，像一张表。 */
+/** 数据面板：三行两列的表，14px 下也能看出是表格（不用 2×2 方块，那个像 "88"）。 */
 export function IconTable({ size = 14 } = {}) {
   return svg(size, [
-    h('rect', { key: 'a', x: 2.5, y: 2.5, width: 4.6, height: 4.6, rx: 1, stroke: 'currentColor', 'stroke-width': 1.4 }),
-    h('rect', { key: 'b', x: 8.9, y: 2.5, width: 4.6, height: 4.6, rx: 1, stroke: 'currentColor', 'stroke-width': 1.4 }),
-    h('rect', { key: 'c', x: 2.5, y: 8.9, width: 4.6, height: 4.6, rx: 1, stroke: 'currentColor', 'stroke-width': 1.4 }),
-    h('rect', { key: 'd', x: 8.9, y: 8.9, width: 4.6, height: 4.6, rx: 1, stroke: 'currentColor', 'stroke-width': 1.4 }),
+    h('rect', {
+      key: 'frame',
+      x: 2.4,
+      y: 3,
+      width: 11.2,
+      height: 10,
+      rx: 1.4,
+      stroke: 'currentColor',
+      'stroke-width': 1.4,
+    }),
+    h('path', {
+      key: 'grid',
+      d: 'M2.4 6.4h11.2M2.4 9.8h11.2M6.2 6.4V13',
+      stroke: 'currentColor',
+      'stroke-width': 1.2,
+      'stroke-linecap': 'round',
+    }),
   ])
 }
 

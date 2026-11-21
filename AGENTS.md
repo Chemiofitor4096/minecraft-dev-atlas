@@ -72,7 +72,11 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 | `npm install` 被 peer 挡住 | `peerDependencies` 里有未发布的 `minecraft-dev-starter` | 开发期 `npm install --legacy-peer-deps`；`@deepseek-ai/*` 的 peer 已显式列进 devDependencies |
 | npm 在 PowerShell 里不能执行 | 执行策略禁用了 `npm.ps1` | 用 `npm.cmd`；`npm test` 的 pretest 会先构建客户端 |
 | 客户端整包不加载 | 没有 `__ModuleLoader__.load` 包装 / factory 里用了 ESM | esbuild 打 CJS，banner/footer 在 `scripts/build-client.mjs`；`test/bundle.test.js` 在 VM 里真跑一遍 |
-| 面板拿不到数据 | 面板没有"当前会话"，宿主按最近一个会话 cwd 解析 | `/atlas/api` 的默认 workspace 来自 `ctx.sessions`（`ATLAS_WORKSPACE` 可固定）；客户端只发相对路径 |
+| 面板拿不到数据 | 面板没有"当前会话"，宿主按最近一个会话 cwd 解析 | 会话作用域的 slot（标题栏 utilities、右侧栏 tab 正文）都能拿到 `sessionId` + `useSessions`（slots 的 session 标准包）；把它们喂进 workspace store，不要用宿主默认 |
+| 面板/入口停在上一个会话的工程 | 用"宿主最近一个会话"当默认工作区 | 同上：`setWorkspace(session cwd)`；切会话时先清空再识别 |
+| 入口在非 MC 工作区常驻 | 只判"有没有 MC 工程"会把 `templates/`、`test/` 夹具算进来 | 判据是"近处"工程：cwd 本身或直接子目录（`projectDepth <= 1`）；`kind=unknown` 不算 |
+| `ctx.mcdev.projects({ workspace })` 扫的是宿主默认目录 | starter 的 `resolveRoot` 是 `requested ?? resolveRoot()`，`workspace` 只解析**相对 root** | 调用时把绝对的 `root` 一起传下去（`{ root: workspace, workspace }`） |
+| 面板导出打到工作区根而不是工程 | 只传 workspace 时 atlas 把 workspace 当 root | 面板传 `root` + `taskPath`（`kind=server`）；工具在"工作区根不是工程"时用 projects 回退到唯一候选 |
 | 客户端 fetch 被 CORS 拒 | 用了绝对 origin | 桌面外壳页面是 `dsh-app://app/`，必须 `/atlas/api/...` 相对路径 |
 
 其他约定：
@@ -127,3 +131,22 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
   合并后的 client bundle 里能找到 `id: 'minecraft-dev-atlas'`、`.atlas-panel`、`minecraft-dev-atlas:data-button`。
 - 合计 98 个测试全绿。
 - 尚未做：真机面板的视觉冒烟（需要装在 desktop / mc-dev-starter profile 并重启 DSH 后用眼睛看）。
+
+### 跟随会话与入口判据（2026-11-21 修订，通过）
+
+- **面板跟当前会话**：`DataButton` 与 `DataTab` 都从 session 标准 props 取 cwd（`sessionId` +
+  `useSessions`），喂 `workspaceStore`；切会话先清空再识别。位置：`src/client/lib/workspace.js`
+  （无 React，可在 Node 里测） + `useWorkspace.js`。
+- **入口判据**：`hasNearbyMcProject(projects, cwd)`（cwd 或直接子目录内、`kind != unknown`）才显示
+  「数据」按钮；`C:\Projects\minecraft-dev-starter` 的 `templates/*` 与 `test/*` 夹具不再让入口常驻。
+  老 starter（没有 `ctx.mcdev.projects()`）或识别异常时退回"总是显示"。
+- **工程选择**：`/atlas/api/data.projects` 走 `ctx.mcdev.projects()`；面板按 cwd → 附近能跑服务端的
+  → 第一个的顺序默认；多工程给选择器；导出传 `root` + `taskPath`。
+- **starter 语义坑**：`projects.scan` 的 `workspace` 只解析相对 root；服务调用必须传绝对 `root`，
+  否则扫的是宿主默认会话（真机复现：面板在 Test 会话里却扫到 `minecraft-dev-atlas`）。
+- **工作区根回退**：`export.js` 在工作区根不是工程且没显式给 root 时，用 `mcdev.projects` 落到
+  唯一可导出工程；多个 → `NO_RUN_TARGET` 列出候选（最多 8 个）。
+- 真 web 运行时（临时 profile）验证：`data.projects` 对 4 个工作区返回正确工程；面板 API 触发导出
+  14 秒完成、`exitCode 0`、计数与真机一致；服务端 client bundle 里包含 `data.projects`、
+  `panel.noProject`、`hasNearbyMcProject`。
+- 合计 120 个测试全绿。

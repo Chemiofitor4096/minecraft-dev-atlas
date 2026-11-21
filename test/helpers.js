@@ -76,6 +76,7 @@ export function fakeMcdev(options = {}) {
       throw new Error('fakeMcdev: 没有给 launch 实现')
     }),
     list: options.list ?? (async () => []),
+    projects: options.projects ?? (async () => ({ projects: [] })),
   }
   return {
     launchCalls,
@@ -86,9 +87,15 @@ export function fakeMcdev(options = {}) {
     setList(fn) {
       state.list = fn
     },
+    setProjects(fn) {
+      state.projects = fn
+    },
     service: {
       version: '0.3.0',
-      capabilities: ['launch', 'stop', 'list', 'resolve-java'],
+      capabilities: ['projects', 'launch', 'stop', 'list', 'resolve-java'],
+      async projects(input) {
+        return await state.projects(input)
+      },
       async launch(input) {
         launchCalls.push(input)
         return await state.launch(input)

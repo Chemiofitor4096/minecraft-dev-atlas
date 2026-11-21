@@ -3,6 +3,9 @@
  *
  * 数据全部走宿主的 `/atlas/api`（与工具同一个 atlas 门面），面板不做第二套查询：
  * 搜索、翻页都在宿主侧完成，花的是本地 IO，不是模型 token。
+ *
+ * "这是哪个工程"来自 workspace store（由标题栏按钮从会话上下文注入）：会话切到哪个
+ * 工作区，面板就跟到那个工作区里"当前会话所在/能跑的"那个工程，而不是宿主最近一个会话。
  * @module minecraft-dev-atlas/client/DataTab
  */
 
@@ -13,6 +16,15 @@ import { h } from '../lib/h.js'
 import { IconExport, IconRefresh } from '../lib/icons.js'
 import { t } from '../lib/messages.js'
 import { useLocale } from '../lib/useLocale.js'
+import {
+  loadProjects,
+  nearbyMcProjects,
+  pickProject,
+  selectProject,
+  serverTargetOf,
+  setWorkspace,
+} from '../lib/workspace.js'
+import { useWorkspace } from '../lib/useWorkspace.js'
 
 /** 一页 50 条：和工具的默认 limit 对齐，翻页手感也够用。 */
 const PAGE_SIZE = 50
@@ -22,8 +34,43 @@ const SEARCH_DEBOUNCE_MS = 250
 
 const KINDS = ['registry', 'tag', 'recipe']
 
-export function DataTab() {
+/**
+ * 右侧栏标签的 scope 是 session，所以正文也拿得到 `sessionId` / `useSessions`
+ * （slots 的 session 标准包）。有就直接用它定位当前会话的工作区——
+ * 不依赖标题栏按钮先挂载，也不依赖"宿主最近一个会话"。
+ * @param {{ sessionId?: string, useSessions?: any }} [props]
+ */
+export function DataTab(props) {
+  if (props?.useSessions === undefined) return h(DataTabBody, { cwd: undefined })
+  return h(SessionDataTab, props)
+}
+
+/**
+ * @param {{ sessionId?: string, useSessions: any }} props
+ */
+function SessionDataTab(props) {
+  const cwd = props.useSessions((state) => state.byId?.[props.sessionId]?.cwd)
+  return h(DataTabBody, { cwd: typeof cwd === 'string' && cwd !== '' ? cwd : undefined })
+}
+
+/**
+ * @param {{ cwd?: string }} props
+ */
+function DataTabBody({ cwd }) {
   useLocale()
+  const workspace = useWorkspace()
+  const project = findProject(workspace)
+  const projectRoot = project?.root
+  const workspaceCwd = workspace.cwd
+  const serverTarget = serverTargetOf(project)
+  // 老 starter 没有 projects 能力（或识别失败）：退回"宿主默认工作区"的旧行为，
+  // 只是没有工程选择。宁可功能降级，也不要让面板卡在"加载中"。
+  const legacy = workspace.supported === false || workspace.error !== undefined
+
+  useEffect(() => {
+    void setWorkspace(cwd)
+  }, [cwd])
+
   const [status, setStatus] = useState(/** @type {Record<string, any>} */ ({ loading: true }))
   const [digest, setDigest] = useState(/** @type {Record<string, any> | undefined} */ (undefined))
   const [kind, setKind] = useState('registry')
@@ -40,15 +87,15 @@ export function DataTab() {
 
   /** 读工程状态；有数据就顺手拉一份摘要。 */
   const loadStatus = useCallback(async () => {
-    const next = await call('data.state', {})
-    setStatus({ loading: false, ...next })
-    if (next.hasDump === true) {
-      setDigest(await call('data.query', { kind: 'digest' }))
-    } else {
-      setDigest(undefined)
+    if (legacy !== true && typeof projectRoot !== 'string') return
+    const target = {
+      ...(typeof projectRoot === 'string' ? { root: projectRoot } : {}),
+      ...(typeof workspaceCwd === 'string' ? { workspace: workspaceCwd } : {}),
     }
-    return next
-  }, [])
+    const next = await call('data.state', target)
+    setStatus({ loading: false, ...next })
+    setDigest(next.hasDump === true ? await call('data.query', { ...target, kind: 'digest' }) : undefined)
+  }, [legacy, projectRoot, workspaceCwd])
 
   useEffect(() => {
     let cancelled = false
@@ -59,6 +106,13 @@ export function DataTab() {
       cancelled = true
     }
   }, [loadStatus])
+
+  // 切工程 = 换一份数据：页码回到第一页
+  useEffect(() => {
+    setOffset(0)
+    setStatus({ loading: true })
+    setDigest(undefined)
+  }, [projectRoot, workspaceCwd])
 
   // 摘要里没有当前注册表（换工程 / 换 MC 版本）时，落到第一张
   useEffect(() => {
@@ -79,10 +133,17 @@ export function DataTab() {
   // 当前页
   useEffect(() => {
     if (status.hasDump !== true) return undefined
+    if (legacy !== true && typeof projectRoot !== 'string') return undefined
     let cancelled = false
     setPage({ loading: true })
     /** @type {Record<string, any>} */
-    const payload = { kind, limit: PAGE_SIZE, offset }
+    const payload = {
+      kind,
+      limit: PAGE_SIZE,
+      offset,
+      ...(typeof projectRoot === 'string' ? { root: projectRoot } : {}),
+      ...(typeof workspaceCwd === 'string' ? { workspace: workspaceCwd } : {}),
+    }
     if (kind === 'registry') payload.registry = registry
     if (kind === 'tag' && tag !== '') payload.tag = tag
     if (debounced !== '') payload.filter = debounced
@@ -96,7 +157,7 @@ export function DataTab() {
     return () => {
       cancelled = true
     }
-  }, [status.hasDump, kind, registry, tag, debounced, offset, revision])
+  }, [status.hasDump, kind, registry, tag, debounced, offset, revision, legacy, projectRoot, workspaceCwd])
 
   // 导出计时：服务端起停要几十秒，按钮上得让人看见还在动
   useEffect(() => {
@@ -109,10 +170,16 @@ export function DataTab() {
 
   /** 导出一次（面板上只有这个动作会起进程）。 */
   const runExport = async () => {
+    if (legacy !== true && (typeof projectRoot !== 'string' || serverTarget === undefined)) return
     setBusy(true)
     setError(undefined)
     try {
-      await call('data.dump', { refresh: true })
+      await call('data.dump', {
+        ...(typeof projectRoot === 'string' ? { root: projectRoot } : {}),
+        ...(typeof workspaceCwd === 'string' ? { workspace: workspaceCwd } : {}),
+        ...(serverTarget === undefined ? {} : { taskPath: serverTarget.taskPath }),
+        refresh: true,
+      })
       await loadStatus()
       setOffset(0)
       setRevision((value) => value + 1)
@@ -123,10 +190,11 @@ export function DataTab() {
     }
   }
 
-  /** 只重读缓存与摘要，不起进程。 */
+  /** 重新识别工程 + 只重读缓存，不起进程。 */
   const refresh = async () => {
     setError(undefined)
     try {
+      await loadProjects(workspaceCwd, { refresh: true })
       await loadStatus()
       setRevision((value) => value + 1)
     } catch (failure) {
@@ -134,11 +202,15 @@ export function DataTab() {
     }
   }
 
-  if (status.loading === true) {
-    return h('div', { className: 'atlas-panel' }, h('div', { className: 'atlas-loading' }, t('panel.loading')))
+  if (workspace.ready !== true) {
+    return h(
+      'div',
+      { className: 'atlas-panel' },
+      h('div', { className: 'atlas-loading' }, t('panel.loadingProjects')),
+    )
   }
 
-  if (status.hasDump !== true) {
+  if (legacy !== true && workspace.error === undefined && nearbyMcProjects(workspace.projects, workspaceCwd).length === 0) {
     return h(
       'div',
       { className: 'atlas-panel' },
@@ -146,13 +218,47 @@ export function DataTab() {
       h(
         'div',
         { className: 'atlas-empty' },
+        h('div', undefined, t('panel.noProject')),
+        h('div', { className: 'atlas-hint' }, t('panel.noProjectHint', { cwd: workspaceCwd ?? '—' })),
+        h(
+          'button',
+          { type: 'button', className: 'atlas-mini', onClick: () => void refresh() },
+          h('span', { className: 'atlas-icon' }, h(IconRefresh, { size: 12 })),
+          t('panel.rescan'),
+        ),
+      ),
+    )
+  }
+
+  if (status.loading === true) {
+    return h('div', { className: 'atlas-panel' }, h('div', { className: 'atlas-loading' }, t('panel.loading')))
+  }
+
+  const exportDisabled = busy || (legacy !== true && serverTarget === undefined)
+  const exportHint = legacy !== true && serverTarget === undefined ? t('panel.noServerTarget') : undefined
+
+  if (status.hasDump !== true) {
+    return h(
+      'div',
+      { className: 'atlas-panel' },
+      h(
+        'div',
+        { className: 'atlas-head' },
+        h('div', { className: 'atlas-title' }, t('tab.data')),
+        project === undefined ? undefined : h('div', { className: 'atlas-chips' }, projectLabel(project)),
+      ),
+      projectSelector(workspace, project),
+      h(
+        'div',
+        { className: 'atlas-empty' },
         h('div', undefined, t('panel.noData')),
         h('div', { className: 'atlas-hint' }, t('panel.noDataHint')),
-        exportButton(busy, runExport, t('panel.export')),
+        exportButton(busy, exportDisabled, exportHint, t('panel.export'), runExport),
       ),
       busy ? h('div', { className: 'atlas-hint' }, `${seconds}s`) : undefined,
       status.error === undefined ? undefined : h('div', { className: 'atlas-error' }, t('panel.error', { message: status.error })),
       error === undefined ? undefined : h('div', { className: 'atlas-error' }, t('panel.error', { message: error })),
+      exportHint === undefined ? undefined : h('div', { className: 'atlas-hint' }, exportHint),
     )
   }
 
@@ -171,9 +277,11 @@ export function DataTab() {
       'div',
       { className: 'atlas-head' },
       h('div', { className: 'atlas-title' }, t('tab.data')),
+      project === undefined ? undefined : h('div', { className: 'atlas-chips' }, projectLabel(project)),
       h('div', { className: 'atlas-chips' }, envText(digest?.env)),
       h('div', { className: 'atlas-chips' }, countsText(digest?.counts)),
     ),
+    projectSelector(workspace, project),
     h(
       'div',
       { className: 'atlas-toolbar' },
@@ -232,7 +340,7 @@ export function DataTab() {
         { type: 'button', className: 'atlas-mini', title: t('panel.refresh'), onClick: () => void refresh() },
         h('span', { className: 'atlas-icon' }, h(IconRefresh, { size: 12 })),
       ),
-      exportButton(busy, runExport, t('panel.reexport')),
+      exportButton(busy, exportDisabled, exportHint, t('panel.reexport'), runExport),
     ),
     busy ? h('div', { className: 'atlas-hint' }, `${t('panel.exporting')} ${seconds}s`) : undefined,
     digest?.stale === true ? h('div', { className: 'atlas-stale' }, t('panel.stale')) : undefined,
@@ -283,14 +391,72 @@ export function DataTab() {
 }
 
 /**
- * @param {boolean} busy
- * @param {() => Promise<void>} runExport
- * @param {string} label
+ * 从 store 快照里找当前工程（避免再读一次 store 导致快照不一致）。
+ * @param {Record<string, any>} workspace
  */
-function exportButton(busy, runExport, label) {
+function findProject(workspace) {
+  const found = (workspace.projects ?? []).find((entry) => entry.root === workspace.selectedRoot)
+  return found ?? pickProject(workspace.projects, workspace.cwd)
+}
+
+/**
+ * 多工程时给一个选择器：工作区根（C:\Projects 这种）里不止一个工程。
+ * @param {Record<string, any>} workspace
+ * @param {Record<string, any> | undefined} project
+ */
+function projectSelector(workspace, project) {
+  const candidates = nearbyMcProjects(workspace.projects, workspace.cwd)
+  if (candidates.length <= 1) return undefined
+  return h(
+    'div',
+    { className: 'atlas-toolbar' },
+    h('span', { className: 'atlas-hint' }, t('panel.project')),
+    h(
+      'select',
+      {
+        className: 'atlas-select',
+        value: project?.root ?? '',
+        onChange: (event) => selectProject(event.target.value),
+      },
+      candidates.map((entry) =>
+        h(
+          'option',
+          { key: entry.root, value: entry.root },
+          `${entry.name ?? entry.root}${entry.loader === undefined ? '' : ` · ${entry.loader}`}${entry.mcVersion === undefined ? '' : ` ${entry.mcVersion}`}`,
+        ),
+      ),
+    ),
+  )
+}
+
+/**
+ * @param {Record<string, any>} project
+ * @returns {string}
+ */
+function projectLabel(project) {
+  const parts = [String(project.name ?? project.root ?? '')]
+  if (typeof project.loader === 'string') parts.push(project.loader)
+  if (typeof project.mcVersion === 'string' && project.mcVersion !== '') parts.push(`MC ${project.mcVersion}`)
+  return parts.join(' · ')
+}
+
+/**
+ * @param {boolean} busy
+ * @param {boolean} disabled
+ * @param {string | undefined} hint
+ * @param {string} label
+ * @param {() => Promise<void>} runExport
+ */
+function exportButton(busy, disabled, hint, label, runExport) {
   return h(
     'button',
-    { type: 'button', className: 'atlas-export', disabled: busy, onClick: () => void runExport() },
+    {
+      type: 'button',
+      className: 'atlas-export',
+      disabled,
+      ...(hint === undefined ? {} : { title: hint }),
+      onClick: () => void runExport(),
+    },
     h('span', { className: 'atlas-icon' }, h(IconExport, { size: 12 })),
     busy ? t('panel.exporting') : label,
   )

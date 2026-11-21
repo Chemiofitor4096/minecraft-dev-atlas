@@ -162,6 +162,32 @@ test('data.query：有 dump 时返回 digest 形状', async (t) => {
   assert.equal(query.json.result.items.length, 2)
 })
 
+test('data.projects：走 ctx.mcdev.projects，没有能力时 supported=false', async (t) => {
+  const { ctx, routes, project } = await setup(t)
+  apply(ctx)
+
+  const unsupported = await request(routes[0].handler, {
+    url: '/atlas/api/data.projects',
+    body: JSON.stringify({ workspace: project }),
+  })
+  assert.equal(unsupported.status, 200)
+  assert.equal(unsupported.json.result.supported, false)
+
+  ctx.mcdev.projects = async (input) => ({
+    root: input.workspace,
+    truncated: false,
+    projects: [{ root: input.workspace, name: 'Test', kind: 'mod', loader: 'neoforge', runTargets: [{ taskPath: 'runServer', kind: 'server' }] }],
+  })
+  const supported = await request(routes[0].handler, {
+    url: '/atlas/api/data.projects',
+    body: JSON.stringify({ workspace: project }),
+  })
+  assert.equal(supported.status, 200)
+  assert.equal(supported.json.result.supported, true)
+  assert.equal(supported.json.result.projects[0].root, project)
+  assert.equal(supported.json.result.projects[0].runTargets[0].taskPath, 'runServer')
+})
+
 test('未知方法 404；GET 非 ping 405', async (t) => {
   const { ctx, routes } = await setup(t)
   apply(ctx)

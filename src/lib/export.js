@@ -47,9 +47,19 @@ export async function exportDump(deps, args = {}) {
   const startedAt = Date.now()
   const mcdev = deps.mcdev
   const timeoutMs = Number.isFinite(args.timeoutMs) ? Number(args.timeoutMs) : DEFAULT_TIMEOUT_MS
-  const root = resolveProject(args)
+  let root = resolveProject(args)
   const sections = normalizeSections(args.sections)
-  const taskPath = normalizeTaskPath(args.taskPath)
+  let taskPath = normalizeTaskPath(args.taskPath)
+
+  // 会话开在工作区根上（C:\Projects 这类）时，root 不是工程本身。用 starter 的工程视图
+  // 找到唯一的可导出工程——不猜：找到多个就报出来，让调用方用 root 指明。
+  if (!looksLikeGradleProject(root) && (args.root === undefined || args.root === '')) {
+    const resolved = await resolveWorkspaceProject(mcdev, args.workspace ?? root)
+    if (resolved !== undefined) {
+      root = resolved.root
+      if (args.taskPath === undefined || args.taskPath === '') taskPath = resolved.taskPath
+    }
+  }
 
   if (!looksLikeGradleProject(root)) {
     fail('NO_RUN_TARGET', `${root} 不是 Gradle 工程（没有 build.gradle / settings.gradle / gradlew）：数据只能从运行中的服务端导出`)
@@ -215,6 +225,52 @@ export async function exportDump(deps, args = {}) {
       ? { fingerprintTruncated: true, note: '工程文件超过指纹上限，下次可能误判缓存（用 refresh 强制重导）' }
       : {}),
   }
+}
+
+/**
+ * 用 starter 的 `ctx.mcdev.projects()`（可选能力）把"工作区根"落到唯一的可导出工程上。
+ *
+ * 没有这个能力（starter 太老）或者找不到/找到多个时返回 undefined 或直接报错——
+ * 绝不替调用方在多个工程里挑一个。
+ * @param {Record<string, any>} mcdev
+ * @param {string | undefined} workspace
+ * @returns {Promise<{ root: string, taskPath: string } | undefined>}
+ */
+async function resolveWorkspaceProject(mcdev, workspace) {
+  if (typeof mcdev?.projects !== 'function') return undefined
+  let scanned
+  try {
+    // starter 的 projects() 只用 workspace 解析相对 root，不会拿它当扫描根：
+    // 这里把工作区目录显式作为 root 传下去。
+    scanned = await mcdev.projects({
+      ...(typeof workspace === 'string' && workspace !== '' ? { root: workspace, workspace } : {}),
+    })
+  } catch {
+    return undefined
+  }
+  const candidates = (Array.isArray(scanned?.projects) ? scanned.projects : [])
+    .map((project) => ({ project, target: serverTargetOf(project) }))
+    .filter((entry) => entry.target !== undefined && typeof entry.project?.root === 'string')
+  if (candidates.length === 0) return undefined
+  if (candidates.length === 1) {
+    return { root: candidates[0].project.root, taskPath: candidates[0].target.taskPath }
+  }
+  fail(
+    'NO_RUN_TARGET',
+    `工作区 ${scanned?.root ?? workspace ?? ''} 里有多个可导出的工程（${candidates.length} 个）：${candidates.slice(0, 8).map((entry) => entry.project.root).join('、')}${candidates.length > 8 ? '…' : ''}；用 root 指明其中一个`,
+  )
+}
+
+/**
+ * 工程的服务端运行目标：优先 kind=server，其次以 runServer 结尾的任务名。
+ * @param {Record<string, any>} project
+ * @returns {{ taskPath: string } | undefined}
+ */
+function serverTargetOf(project) {
+  const targets = Array.isArray(project?.runTargets) ? project.runTargets : []
+  const target = targets.find((entry) => entry.kind === 'server')
+    ?? targets.find((entry) => typeof entry.taskPath === 'string' && /(^|:)runServer$/.test(entry.taskPath))
+  return target === undefined ? undefined : { taskPath: target.taskPath }
 }
 
 /**
