@@ -46,12 +46,15 @@ npm install --legacy-peer-deps
 npm run build
 ```
 
-## 两个工具
+## 两个工具 + 一个面板
 
 | 工具 | 做什么 | 代价 |
 |---|---|---|
 | `mc_data_dump` | 带 `-javaagent` 起 `runServer`，导出注册表/标签/配方，按 sourceHash 缓存 | 一次服务端起停（30–60 秒），之后走缓存 |
 | `mc_data_query` | 只读：摘要 / 注册表 / 标签 / 配方查询 | 不起进程，50 行 < 1k token |
+
+面板是右侧栏的「数据」标签（标题栏按钮进入）：只读表格 + 搜索 + 导出 + 翻页，数据走宿主的
+`/atlas/api`，与工具共用同一个门面；人和模型看的是同一份文件，但人不受 token 预算限制。
 
 两个工具都按步挂载：工作区里没有 Gradle 工程时它们不进 schema、也不可调用。
 
@@ -104,8 +107,8 @@ node scripts/e2e-export.mjs C:\Projects\Test   # 走宿主路径的真机导出�
 - **M-A1（已完成）**：Agent 骨架、NeoForge/mojmap adapter、`mc_data_dump`、缓存与 schema 校验。
   已在 `C:\Projects\Test`（NeoForge 21.1.266 / MC 1.21.1）上验过：1339 个物品、1060 个方块、
   707 个标签（6891 个成员）、1290 条配方、`errors: []`；缓存命中 12 ms。
-- **M-A2（部分完成）**：`mc_data_query` + digest 已实现并量过（digest 约 138 token，
-  注册表 50 行约 499 token）；面板「数据」tab 还没做。
+- **M-A2（已完成）**：`mc_data_query` + digest + 面板「数据」tab（标题栏按钮 → 右侧栏标签，
+  只读表格 / 搜索 / 导出 / 翻页）。缓存命中 12 ms；digest 约 138 token，注册表 50 行约 499 token。
 - M-A3（可选）：attach 模式、Fabric/yarn adapter、完整配方 JSON。
 
 ## 许可

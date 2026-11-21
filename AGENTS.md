@@ -16,16 +16,22 @@ DSH 插件：带 Java Agent 起一次 headless 服务端，把注册表 / 标签
 ## 目录
 
 ```
-src/index.js            宿主入口：inject ['mcdev','tools']、能力握手、注册工具
+src/index.js            宿主入口：inject ['mcdev','tools','sessions']、能力握手、注册工具、挂 /atlas/api
 src/tools/              mc_data_dump / mc_data_query + 中文渲染（render.js）+ 挂载判定（shared.js）
 src/lib/
   atlas.js              门面：dump / query / state；索引按 mtime+size 缓存
   export.js             一次导出的编排（缓存 → JAVA_TOOL_OPTIONS → ctx.mcdev.launch → 读标记 → 校验 → meta）
+  panelApi.js           面板的窄方法表：data.state / data.query / data.dump / ping
   paths.js              状态目录（复用 starter 约定）、projectKey
   project.js            Gradle 工程探针 + sourceHash（文件名/大小/mtime，不读内容）
   cache.js              dump 与 meta 的读写、缓存命中判定
   jar.js                zip/manifest 读取（零依赖，prepack 与测试共用）
   errors.js             错误码表（中文含义与工具错误文本）
+src/client/             客户端半边（React + h()，esbuild 打成懒 CJS）
+  index.js              标题栏「数据」按钮、右侧栏标签类型 / 正文 / 标题 chip
+  views/DataTab.js      只读表格 + 搜索 + 导出 + 翻页
+  views/DataButton.js   标题栏入口
+  lib/                  api（相对路径 fetch）/ messages（zh+en）/ styles（--dsw-* 令牌）/ format / icons / runtime
 engine/
   dump.js               parseDump / validateDump（手写 schema=1 校验）
   index.js              indexDump / digest / query（纯函数）
@@ -36,7 +42,8 @@ agent/
   src/main/java/dev/mcdev/atlas/adapters/   NeoForgeMojmap1210：唯一放类名/方法名的地方
   src/main/resources/adapters.properties    <loader>/<mappings>/<MC 线> → adapter 类
 assets/mcdev-atlas.jar  构建产物（gitignore；prepack 现构建）
-scripts/build-agent.mjs 构建 + 拷 jar + 校验 manifest/版本
+lib/client.js           客户端构建产物（gitignore；prepack 现构建）
+scripts/                build-agent.mjs / build-client.mjs / e2e-export.mjs
 test/                   node --test；fixtures/dump-small.json 是引擎夹具
 ```
 
@@ -44,7 +51,8 @@ test/                   node --test；fixtures/dump-small.json 是引擎夹具
 
 ```powershell
 node --test                                   # 全部测试（Node 20 不认 glob，别写 test/*.test.js）
-npm run build                                 # 构建 agent jar 并校验版本（要 JDK 21）
+npm run build                                 # agent jar + 客户端（要 JDK 21）
+npm run build:client                          # 只构建客户端（改 src/client 后至少跑这个）
 node scripts/build-agent.mjs --skip-build     # 只拷贝 + 校验（CI 已构建过时）
 node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 ```
@@ -62,7 +70,10 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 | "包升级了、jar 还是旧的" | `assets/*.jar` 是构建产物 | `build-agent.mjs` 比对 manifest 的 `Implementation-Version` 与 `package.json.version`，不等直接失败 |
 | 导出后读到了上一次的 dump | 失败时旧 dump 还在 | `generatedAt` 必须晚于本次启动（5 秒容差）；不满足按"没写出"归因 |
 | `npm install` 被 peer 挡住 | `peerDependencies` 里有未发布的 `minecraft-dev-starter` | 开发期 `npm install --legacy-peer-deps`；`@deepseek-ai/*` 的 peer 已显式列进 devDependencies |
-| npm 在 PowerShell 里不能执行 | 执行策略禁用了 `npm.ps1` | 用 `npm.cmd` |
+| npm 在 PowerShell 里不能执行 | 执行策略禁用了 `npm.ps1` | 用 `npm.cmd`；`npm test` 的 pretest 会先构建客户端 |
+| 客户端整包不加载 | 没有 `__ModuleLoader__.load` 包装 / factory 里用了 ESM | esbuild 打 CJS，banner/footer 在 `scripts/build-client.mjs`；`test/bundle.test.js` 在 VM 里真跑一遍 |
+| 面板拿不到数据 | 面板没有"当前会话"，宿主按最近一个会话 cwd 解析 | `/atlas/api` 的默认 workspace 来自 `ctx.sessions`（`ATLAS_WORKSPACE` 可固定）；客户端只发相对路径 |
+| 客户端 fetch 被 CORS 拒 | 用了绝对 origin | 桌面外壳页面是 `dsh-app://app/`，必须 `/atlas/api/...` 相对路径 |
 
 其他约定：
 
@@ -96,5 +107,19 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 - Node 侧 72 个测试：引擎校验/查询/摘要、工具与挂载、导出编排（缓存命中、失败归因、ALREADY_RUNNING、
   schema mismatch、旧 dump）、atlas 门面、jar manifest。
 - 已知不足：`item.burnTime` 在 1.21.1 没有跨 loader 的读取入口，固定 null + 一条 warning；
-  配方 `ingredients` 里空槽位是 `[]`（shaped 配方如此，shapeless 目前也可能出现空层）；
-  面板 tab 还没做（M-A2 剩余部分）。
+  配方 `ingredients` 里空槽位是 `[]`（shaped 配方如此，shapeless 目前也可能出现空层）。
+
+### M-A2（2026-11-21，通过）
+
+- `mc_data_query` + digest 已实现并量过（见 M-A1 的 token 数字）。
+- 面板「数据」tab：标题栏按钮（`conversation.session.header.utilities`，order 16）→ 右侧栏
+  `atlas.data` 标签；只读表格（注册表 / 标签 + 成员 / 配方三种视图）+ 搜索（250ms 防抖）+
+  「导出 / 重新导出」+ 翻页；文案 zh/en 两套词典；样式只用 `--dsw-*` 令牌。
+- 宿主 `/atlas/api`：`data.state` / `data.query` / `data.dump` / `ping` / `client.report`；
+  默认 workspace 取最近一个活跃会话 cwd（`ATLAS_WORKSPACE` 可固定）。
+- 客户端产物 32.2 KiB；`test/bundle.test.js` 在 VM 里按 `__ModuleLoader__` 协议真跑：
+  外壳 id、cordis 形状、按钮 / 标签类型 / 正文 / 标题 chip 四处注册、样式只注入一次。
+- `test/host.test.js` 用假 req/res 真打路由：ping、data.state、data.query（读真 dump）、
+  未知方法 404、GET 非 ping 405、client.report、data.dump 的失败码透传。
+- 合计 98 个测试全绿。
+- 尚未做：真机面板的视觉冒烟（要把它装进 desktop profile 并重启 DSH，会打断当前会话）。

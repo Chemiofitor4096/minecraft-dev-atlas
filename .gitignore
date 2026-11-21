@@ -1,7 +1,8 @@
 node_modules/
-# 构建产物：客户端（M-A2 起）与 agent jar 都不进仓库，靠 prepack 现构建
-lib/
-assets/*.jar
+# 构建产物：客户端与 agent jar 都不进仓库，靠 prepack 现构建
+# 注意 `/lib/` 只忽略根目录的产物；不带斜杠的 `lib/` 会误伤 src/client/lib
+/lib/
+/assets/*.jar
 agent/build/
 agent/.gradle/
 test/tmp/

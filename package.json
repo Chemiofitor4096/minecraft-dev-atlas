@@ -7,11 +7,13 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "engine",
+    "lib",
     "assets",
     "cordis.patch.yml",
     "README.md",
@@ -34,12 +36,17 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "scripts": {
-    "build": "node scripts/build-agent.mjs",
+    "build": "node scripts/build-agent.mjs && node scripts/build-client.mjs",
     "build:agent": "node scripts/build-agent.mjs",
-    "prepack": "node scripts/build-agent.mjs --verify",
+    "build:client": "node scripts/build-client.mjs",
+    "pretest": "node scripts/build-client.mjs",
+    "prepack": "node scripts/build-agent.mjs --verify && node scripts/build-client.mjs",
     "test": "node --test"
   },
   "license": "MIT",
@@ -54,6 +61,7 @@
     "@deepseek-ai/dsh-sandbox": "0.2.1-rc.3",
     "@deepseek-ai/dsh-scope": "0.2.1-rc.3",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
-    "@deepseek-ai/schemastery": "3.18.5"
+    "@deepseek-ai/schemastery": "3.18.5",
+    "esbuild": "^0.28.2"
   }
 }

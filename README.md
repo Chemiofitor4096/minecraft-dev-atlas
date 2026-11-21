@@ -43,12 +43,16 @@ npm install --legacy-peer-deps
 npm run build
 ```
 
-## Tools
+## Tools and panel
 
 | Tool | Does | Cost |
 |---|---|---|
 | `mc_data_dump` | Starts `runServer` with `-javaagent`, exports registries/tags/recipes, caches by source hash | one server boot (30–60 s), then cached |
 | `mc_data_query` | Read-only digest / registry / tag / recipe queries over the cached dump | no process, <1k tokens for 50 rows |
+
+The panel is a right-sidebar **Data** tab (opened from a header button): read-only table, search,
+export and paging over the host's `/atlas/api`, sharing the same facade as the tools. Humans browse
+the same file the model only sees summaries of.
 
 Both tools are mounted per step: they only appear when the workspace actually contains a Gradle project.
 
@@ -101,8 +105,9 @@ node scripts/e2e-export.mjs C:\Projects\Test   # real export through the host pa
 - **M-A1 (done)**: agent skeleton, NeoForge/mojmap adapter, `mc_data_dump`, cache + schema validation.
   Verified on `C:\Projects\Test` (NeoForge 21.1.266 / MC 1.21.1): 1339 items, 1060 blocks, 707 tags
   (6891 members), 1290 recipes, `errors: []`. Cached re-export: 12 ms.
-- **M-A2 (partly done)**: `mc_data_query` + digest are implemented and measured (digest ≈ 138 tokens,
-  50 registry rows ≈ 499 tokens); the panel's data tab is still pending.
+- **M-A2 (done)**: `mc_data_query` + digest + the panel's Data tab (header button → right-sidebar tab,
+  read-only table / search / export / paging). Cached re-export: 12 ms; digest ≈ 138 tokens,
+  50 registry rows ≈ 499 tokens.
 - M-A3 (optional): attach mode, Fabric/yarn adapter, full recipe JSON.
 
 ## License
