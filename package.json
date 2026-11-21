@@ -2,7 +2,7 @@
   "name": "minecraft-dev-atlas",
   "version": "0.1.0",
   "private": false,
-  "description": "DSH plugin that exports Minecraft registries, tags and recipes from a running dev server and answers token-cheap queries over them",
+  "description": "DSH plugin that exports registries, tags and a recipe index from a running Minecraft server, with token-efficient queries and a data panel",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -50,6 +50,14 @@
     "test": "node --test"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chemiofitor4096/minecraft-dev-atlas.git"
+  },
+  "homepage": "https://github.com/Chemiofitor4096/minecraft-dev-atlas#readme",
+  "bugs": {
+    "url": "https://github.com/Chemiofitor4096/minecraft-dev-atlas/issues"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-tools": "^0.2.1-rc.1 || ^0.2.2-rc.1",
