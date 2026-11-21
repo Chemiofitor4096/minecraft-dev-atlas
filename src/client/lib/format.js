@@ -1,6 +1,6 @@
 /**
- * 面板的展示格式化：与工具那边的 render.js 同一个口径（默认值省掉、只留有用的），
- * 但这里是给人看的表格，不是给模型的 token 预算。
+ * 面板的展示格式化：与工具侧 render.js 使用同一套判断（默认值省略），
+ * 但这里是给人看的表格，可以多留一点细节。
  * @module minecraft-dev-atlas/client/format
  */
 
@@ -47,30 +47,39 @@ export function ingredientsText(ingredients) {
 }
 
 /**
- * @param {Record<string, any> | null | undefined} counts
- * @returns {string}
- */
-export function countsText(counts) {
-  if (counts === null || counts === undefined) return ''
-  return t('panel.counts', {
-    registries: counts.registries ?? 0,
-    tags: counts.tags ?? 0,
-    members: counts.tagMembers ?? 0,
-    recipes: counts.recipes ?? 0,
-  })
-}
-
-/**
- * 环境一行：loader + 版本、MC、映射、侧。
+ * 完整的导出环境描述：面板里放不进标题，通常用作悬停提示。
  * @param {Record<string, any> | null | undefined} env
  * @returns {string}
  */
 export function envText(env) {
-  if (env === null || env === undefined) return t('env.none')
-  const loader = String(env.loader ?? t('loader.unknown'))
-  const label = loader === 'neoforge' ? 'NeoForge' : loader === 'fabric' ? 'Fabric' : loader === 'forge' ? 'Forge' : loader
+  if (env === null || env === undefined) return ''
   const side = env.side === 'client' ? t('env.side.client') : t('env.side.server')
-  return `${env.loaderVersion === undefined || env.loaderVersion === null ? label : `${label} ${env.loaderVersion}`} · MC ${env.mcVersion ?? '?'} · ${env.mappings ?? '?'} · ${side}`
+  return `${loaderLabel(env.loader)}${env.loaderVersion === undefined || env.loaderVersion === null ? '' : ` ${env.loaderVersion}`} · MC ${env.mcVersion ?? '?'} · ${env.mappings ?? '?'} · ${side}`
+}
+
+/**
+ * loader 的展示名。
+ * @param {string | undefined} loader
+ * @returns {string}
+ */
+export function loaderLabel(loader) {
+  const value = String(loader ?? '')
+  if (value === 'neoforge') return 'NeoForge'
+  if (value === 'fabric') return 'Fabric'
+  if (value === 'forge') return 'Forge'
+  if (value === '' || value === 'unknown') return t('loader.unknown')
+  return value
+}
+
+/**
+ * 资源路径（去掉命名空间）：表格里 id 与命名空间分两列展示。
+ * @param {string} id
+ * @returns {string}
+ */
+export function pathOf(id) {
+  const value = String(id ?? '')
+  const colon = value.indexOf(':')
+  return colon < 0 ? value : value.slice(colon + 1)
 }
 
 /**
@@ -82,9 +91,4 @@ export function timeText(iso) {
   if (Number.isNaN(date.getTime())) return '—'
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-/** 只保留一层命名空间，表格里不重复写 `minecraft:` 前缀。 */
-export function shortId(id) {
-  return String(id ?? '').replace(/^minecraft:/, '')
 }

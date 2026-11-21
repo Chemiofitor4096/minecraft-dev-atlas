@@ -1,17 +1,14 @@
 /**
  * 右侧栏「数据」标签：只读表格 + 搜索 + 导出。
  *
- * 数据全部走宿主的 `/atlas/api`（与工具同一个 atlas 门面），面板不做第二套查询：
- * 搜索、翻页都在宿主侧完成，花的是本地 IO，不是模型 token。
- *
- * "这是哪个工程"来自 workspace store（由标题栏按钮从会话上下文注入）：会话切到哪个
- * 工作区，面板就跟到那个工作区里"当前会话所在/能跑的"那个工程，而不是宿主最近一个会话。
+ * 数据全部经宿主的 `/atlas/api` 获取（与工具共用同一个 atlas 门面），面板不做第二套查询。
+ * 工作区来自会话上下文（title bar 按钮与标签正文都能拿到 sessionId/useSessions）。
  * @module minecraft-dev-atlas/client/DataTab
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import { call } from '../lib/api.js'
-import { countsText, envText, ingredientsText, propsText, resultText, shortId, timeText } from '../lib/format.js'
+import { envText, ingredientsText, loaderLabel, pathOf, propsText, resultText, timeText } from '../lib/format.js'
 import { h } from '../lib/h.js'
 import { IconExport, IconRefresh } from '../lib/icons.js'
 import { t } from '../lib/messages.js'
@@ -26,18 +23,16 @@ import {
 } from '../lib/workspace.js'
 import { useWorkspace } from '../lib/useWorkspace.js'
 
-/** 一页 50 条：和工具的默认 limit 对齐，翻页手感也够用。 */
-const PAGE_SIZE = 50
+/** 可选的每页条数；上限与 `mc_data_query` 的 limit 一致。 */
+const PAGE_SIZES = [50, 100, 200]
 
-/** 搜索防抖：输入停下来再查，别每敲一个字打一次宿主。 */
+/** 搜索防抖：输入停止后再查询，避免每次按键都请求宿主。 */
 const SEARCH_DEBOUNCE_MS = 250
 
 const KINDS = ['registry', 'tag', 'recipe']
 
 /**
- * 右侧栏标签的 scope 是 session，所以正文也拿得到 `sessionId` / `useSessions`
- * （slots 的 session 标准包）。有就直接用它定位当前会话的工作区——
- * 不依赖标题栏按钮先挂载，也不依赖"宿主最近一个会话"。
+ * 右侧栏标签的 scope 是 session，正文可以直接拿到 `sessionId` / `useSessions`。
  * @param {{ sessionId?: string, useSessions?: any }} [props]
  */
 export function DataTab(props) {
@@ -63,8 +58,7 @@ function DataTabBody({ cwd }) {
   const projectRoot = project?.root
   const workspaceCwd = workspace.cwd
   const serverTarget = serverTargetOf(project)
-  // 老 starter 没有 projects 能力（或识别失败）：退回"宿主默认工作区"的旧行为，
-  // 只是没有工程选择。宁可功能降级，也不要让面板卡在"加载中"。
+  // 老 starter 没有 projects 能力（或识别失败）时退回宿主默认工作区，只是没有工程选择。
   const legacy = workspace.supported === false || workspace.error !== undefined
 
   useEffect(() => {
@@ -78,6 +72,7 @@ function DataTabBody({ cwd }) {
   const [tag, setTag] = useState('')
   const [filter, setFilter] = useState('')
   const [debounced, setDebounced] = useState('')
+  const [pageSize, setPageSize] = useState(100)
   const [offset, setOffset] = useState(0)
   const [page, setPage] = useState(/** @type {Record<string, any>} */ ({ loading: false }))
   const [busy, setBusy] = useState(false)
@@ -85,7 +80,7 @@ function DataTabBody({ cwd }) {
   const [error, setError] = useState(/** @type {string | undefined} */ (undefined))
   const [revision, setRevision] = useState(0)
 
-  /** 读工程状态；有数据就顺手拉一份摘要。 */
+  /** 读取工程状态；有数据时同时获取摘要。 */
   const loadStatus = useCallback(async () => {
     if (legacy !== true && typeof projectRoot !== 'string') return
     const target = {
@@ -107,21 +102,21 @@ function DataTabBody({ cwd }) {
     }
   }, [loadStatus])
 
-  // 切工程 = 换一份数据：页码回到第一页
+  // 切换工程等于换一份数据：回到第一页并清空旧摘要
   useEffect(() => {
     setOffset(0)
     setStatus({ loading: true })
     setDigest(undefined)
   }, [projectRoot, workspaceCwd])
 
-  // 摘要里没有当前注册表（换工程 / 换 MC 版本）时，落到第一张
+  // 摘要中不存在当前注册表时，落到第一张
   useEffect(() => {
     if (digest === undefined) return
     const ids = (digest.registries ?? []).map((entry) => entry.id)
     if (ids.length > 0 && !ids.includes(registry)) setRegistry(ids[0])
   }, [digest, registry])
 
-  // 搜索防抖：输入停下来 250ms 再查，顺便回到第一页
+  // 搜索防抖：输入停止后查询，并回到第一页
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebounced(filter.trim().toLowerCase())
@@ -139,7 +134,7 @@ function DataTabBody({ cwd }) {
     /** @type {Record<string, any>} */
     const payload = {
       kind,
-      limit: PAGE_SIZE,
+      limit: pageSize,
       offset,
       ...(typeof projectRoot === 'string' ? { root: projectRoot } : {}),
       ...(typeof workspaceCwd === 'string' ? { workspace: workspaceCwd } : {}),
@@ -157,9 +152,9 @@ function DataTabBody({ cwd }) {
     return () => {
       cancelled = true
     }
-  }, [status.hasDump, kind, registry, tag, debounced, offset, revision, legacy, projectRoot, workspaceCwd])
+  }, [status.hasDump, kind, registry, tag, debounced, offset, pageSize, revision, legacy, projectRoot, workspaceCwd])
 
-  // 导出计时：服务端起停要几十秒，按钮上得让人看见还在动
+  // 导出计时
   useEffect(() => {
     if (!busy) return undefined
     setSeconds(0)
@@ -168,7 +163,7 @@ function DataTabBody({ cwd }) {
     return () => clearInterval(timer)
   }, [busy])
 
-  /** 导出一次（面板上只有这个动作会起进程）。 */
+  /** 导出一次；面板上只有这个动作会启动进程。 */
   const runExport = async () => {
     if (legacy !== true && (typeof projectRoot !== 'string' || serverTarget === undefined)) return
     setBusy(true)
@@ -190,7 +185,7 @@ function DataTabBody({ cwd }) {
     }
   }
 
-  /** 重新识别工程 + 只重读缓存，不起进程。 */
+  /** 重新识别工程并重读缓存，不启动进程。 */
   const refresh = async () => {
     setError(undefined)
     try {
@@ -203,22 +198,17 @@ function DataTabBody({ cwd }) {
   }
 
   if (workspace.ready !== true) {
-    return h(
-      'div',
-      { className: 'atlas-panel' },
-      h('div', { className: 'atlas-loading' }, t('panel.loadingProjects')),
-    )
+    return h('div', { className: 'atlas-panel' }, h('div', { className: 'atlas-loading' }, t('panel.loadingProjects')))
   }
 
   if (legacy !== true && workspace.error === undefined && nearbyMcProjects(workspace.projects, workspaceCwd).length === 0) {
     return h(
       'div',
       { className: 'atlas-panel' },
-      h('div', { className: 'atlas-head' }, h('div', { className: 'atlas-title' }, t('tab.data'))),
       h(
         'div',
         { className: 'atlas-empty' },
-        h('div', undefined, t('panel.noProject')),
+        h('div', { className: 'atlas-empty-title' }, t('panel.noProject')),
         h('div', { className: 'atlas-hint' }, t('panel.noProjectHint', { cwd: workspaceCwd ?? '—' })),
         h(
           'button',
@@ -234,31 +224,26 @@ function DataTabBody({ cwd }) {
     return h('div', { className: 'atlas-panel' }, h('div', { className: 'atlas-loading' }, t('panel.loading')))
   }
 
-  const exportDisabled = busy || (legacy !== true && serverTarget === undefined)
-  const exportHint = legacy !== true && serverTarget === undefined ? t('panel.noServerTarget') : undefined
+  const serverMissing = legacy !== true && serverTarget === undefined
+  const exportDisabled = busy || serverMissing
 
   if (status.hasDump !== true) {
     return h(
       'div',
       { className: 'atlas-panel' },
-      h(
-        'div',
-        { className: 'atlas-head' },
-        h('div', { className: 'atlas-title' }, t('tab.data')),
-        project === undefined ? undefined : h('div', { className: 'atlas-chips' }, projectLabel(project)),
-      ),
+      contextHeader(project, digest, workspaceCwd),
       projectSelector(workspace, project),
       h(
         'div',
         { className: 'atlas-empty' },
-        h('div', undefined, t('panel.noData')),
+        h('div', { className: 'atlas-empty-title' }, t('panel.noData')),
         h('div', { className: 'atlas-hint' }, t('panel.noDataHint')),
-        exportButton(busy, exportDisabled, exportHint, t('panel.export'), runExport),
+        exportButton(busy, exportDisabled, serverMissing ? t('panel.noServerTarget') : undefined, t('panel.export'), runExport),
       ),
-      busy ? h('div', { className: 'atlas-hint' }, `${seconds}s`) : undefined,
+      busy ? h('div', { className: 'atlas-hint' }, `${t('panel.exporting')} ${seconds}s`) : undefined,
+      serverMissing ? h('div', { className: 'atlas-hint' }, t('panel.noServerTarget')) : undefined,
       status.error === undefined ? undefined : h('div', { className: 'atlas-error' }, t('panel.error', { message: status.error })),
       error === undefined ? undefined : h('div', { className: 'atlas-error' }, t('panel.error', { message: error })),
-      exportHint === undefined ? undefined : h('div', { className: 'atlas-hint' }, exportHint),
     )
   }
 
@@ -269,18 +254,12 @@ function DataTabBody({ cwd }) {
   const from = items.length === 0 ? 0 : offset + 1
   const to = offset + items.length
   const registries = Array.isArray(digest?.registries) ? digest.registries : []
+  const memberView = kind === 'tag' && tag !== ''
 
   return h(
     'div',
     { className: 'atlas-panel' },
-    h(
-      'div',
-      { className: 'atlas-head' },
-      h('div', { className: 'atlas-title' }, t('tab.data')),
-      project === undefined ? undefined : h('div', { className: 'atlas-chips' }, projectLabel(project)),
-      h('div', { className: 'atlas-chips' }, envText(digest?.env)),
-      h('div', { className: 'atlas-chips' }, countsText(digest?.counts)),
-    ),
+    contextHeader(project, digest, workspaceCwd),
     projectSelector(workspace, project),
     h(
       'div',
@@ -313,12 +292,13 @@ function DataTabBody({ cwd }) {
             {
               className: 'atlas-select',
               value: registry,
+              title: t('panel.registry'),
               onChange: (event) => {
                 setRegistry(event.target.value)
                 setOffset(0)
               },
             },
-            registries.map((entry) => h('option', { key: entry.id, value: entry.id }, `${shortId(entry.id)} (${entry.count})`)),
+            registries.map((entry) => h('option', { key: entry.id, value: entry.id }, `${pathOf(entry.id)} (${entry.count})`)),
           ),
       tag === ''
         ? undefined
@@ -327,7 +307,7 @@ function DataTabBody({ cwd }) {
             { type: 'button', className: 'atlas-back', onClick: () => { setTag(''); setOffset(0) } },
             t('panel.back'),
           ),
-      kind === 'tag' && tag !== ''
+      memberView
         ? undefined
         : h('input', {
             className: 'atlas-input',
@@ -337,70 +317,197 @@ function DataTabBody({ cwd }) {
           }),
       h(
         'button',
-        { type: 'button', className: 'atlas-mini', title: t('panel.refresh'), onClick: () => void refresh() },
+        { type: 'button', className: 'atlas-mini atlas-icon-button', title: t('panel.refresh'), onClick: () => void refresh() },
         h('span', { className: 'atlas-icon' }, h(IconRefresh, { size: 12 })),
       ),
-      exportButton(busy, exportDisabled, exportHint, t('panel.reexport'), runExport),
+      exportButton(busy, exportDisabled, serverMissing ? t('panel.noServerTarget') : undefined, t('panel.reexport'), runExport),
     ),
     busy ? h('div', { className: 'atlas-hint' }, `${t('panel.exporting')} ${seconds}s`) : undefined,
     digest?.stale === true ? h('div', { className: 'atlas-stale' }, t('panel.stale')) : undefined,
+    serverMissing ? h('div', { className: 'atlas-hint' }, t('panel.noServerTarget')) : undefined,
     page.error === undefined ? undefined : h('div', { className: 'atlas-error' }, t('panel.error', { message: page.error })),
     error === undefined ? undefined : h('div', { className: 'atlas-error' }, t('panel.error', { message: error })),
     h(
       'div',
-      { className: 'atlas-rows' },
-      page.loading === true
-        ? h('div', { className: 'atlas-loading' }, t('panel.loading'))
-        : items.length === 0
-          ? h('div', { className: 'atlas-loading' }, kind === 'tag' && tag === '' ? t('panel.tagHint') : t('panel.empty'))
-          : rowsOf(kind, tag, items, (picked) => {
-            setTag(picked)
-            setOffset(0)
-          }),
+      { className: 'atlas-table' },
+      tableHead(kind, tag, matched),
+      h(
+        'div',
+        { className: 'atlas-tbody' },
+        page.loading === true
+          ? h('div', { className: 'atlas-loading' }, t('panel.loading'))
+          : items.length === 0
+            ? h('div', { className: 'atlas-loading' }, kind === 'tag' && tag === '' ? t('panel.tagHint') : t('panel.empty'))
+            : rowsOf(kind, tag, items, (picked) => {
+              setTag(picked)
+              setOffset(0)
+            }),
+      ),
     ),
     h(
       'div',
       { className: 'atlas-pager' },
-      h('span', undefined, `${t('panel.matched', { count: matched })} · ${from}–${to}`),
+      h('span', { className: 'atlas-range' }, `${t('panel.matched', { count: matched })} · ${from}–${to}`),
       h(
-        'button',
-        {
-          type: 'button',
-          className: 'atlas-mini',
-          disabled: offset === 0 || page.loading === true,
-          onClick: () => setOffset(Math.max(0, offset - PAGE_SIZE)),
-        },
-        t('panel.prev'),
+        'label',
+        { className: 'atlas-page-size' },
+        t('panel.pageSize'),
+        h(
+          'select',
+          {
+            className: 'atlas-select atlas-select-sm',
+            value: String(pageSize),
+            onChange: (event) => {
+              setPageSize(Number(event.target.value))
+              setOffset(0)
+            },
+          },
+          PAGE_SIZES.map((size) => h('option', { key: size, value: String(size) }, String(size))),
+        ),
       ),
       h(
-        'button',
-        {
-          type: 'button',
-          className: 'atlas-mini',
-          disabled: nextOffset === undefined || page.loading === true,
-          onClick: () => {
-            if (nextOffset !== undefined) setOffset(nextOffset)
+        'span',
+        { className: 'atlas-pager-btns' },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'atlas-mini',
+            disabled: offset === 0 || page.loading === true,
+            onClick: () => setOffset(Math.max(0, offset - pageSize)),
           },
-        },
-        t('panel.next'),
+          t('panel.prev'),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'atlas-mini',
+            disabled: nextOffset === undefined || page.loading === true,
+            onClick: () => {
+              if (nextOffset !== undefined) setOffset(nextOffset)
+            },
+          },
+          t('panel.next'),
+        ),
       ),
     ),
-    h('div', { className: 'atlas-foot' }, `${String(digest?.path ?? status.path ?? '')} · ${timeText(digest?.generatedAt)}`),
-    h('div', { className: 'atlas-hint' }, t('panel.excerpt')),
+    h(
+      'div',
+      { className: 'atlas-foot', title: `${envText(digest?.env)}\n${t('panel.excerpt')}` },
+      h('span', { className: 'atlas-path', title: String(digest?.path ?? status.path ?? '') }, String(digest?.path ?? status.path ?? '')),
+      h('span', { className: 'atlas-dot' }, '·'),
+      h('span', { className: 'atlas-time' }, timeText(digest?.generatedAt)),
+    ),
   )
 }
 
 /**
- * 从 store 快照里找当前工程（避免再读一次 store 导致快照不一致）。
- * @param {Record<string, any>} workspace
+ * 标题区：工程名 + loader/MC 版本片，下面一行是数据量。
+ * 完整环境放在悬停提示里，避免与 Mod Dev 面板重复。
+ * @param {Record<string, any> | undefined} project
+ * @param {Record<string, any> | undefined} digest
+ * @param {string | undefined} workspaceCwd
  */
-function findProject(workspace) {
-  const found = (workspace.projects ?? []).find((entry) => entry.root === workspace.selectedRoot)
-  return found ?? pickProject(workspace.projects, workspace.cwd)
+function contextHeader(project, digest, workspaceCwd) {
+  const name = project?.name ?? project?.root ?? workspaceCwd ?? t('tab.data')
+  const chip = projectChip(project, digest)
+  return h(
+    'div',
+    { className: 'atlas-context', title: String(project?.root ?? workspaceCwd ?? '') },
+    h(
+      'div',
+      { className: 'atlas-context-main' },
+      h('span', { className: 'atlas-project-name' }, String(name)),
+      chip === '' ? undefined : h('span', { className: 'atlas-chip', title: envText(digest?.env) }, chip),
+    ),
+    countsLine(digest?.counts),
+  )
 }
 
 /**
- * 多工程时给一个选择器：工作区根（C:\Projects 这种）里不止一个工程。
+ * @param {Record<string, any> | undefined} project
+ * @param {Record<string, any> | undefined} digest
+ * @returns {string}
+ */
+function projectChip(project, digest) {
+  const loader = project?.loader ?? digest?.env?.loader
+  const mcVersion = project?.mcVersion ?? digest?.env?.mcVersion
+  if (typeof loader !== 'string' || loader === '' || loader === 'unknown') return ''
+  return `${loaderLabel(loader)}${typeof mcVersion === 'string' && mcVersion !== '' ? ` ${mcVersion}` : ''}`
+}
+
+/**
+ * @param {Record<string, any> | undefined} counts
+ */
+function countsLine(counts) {
+  if (counts === undefined || counts === null) return undefined
+  const parts = [
+    { key: 'registries', label: t('count.registries'), value: counts.registries },
+    { key: 'tags', label: t('count.tags'), value: counts.tags, note: t('count.tagMembers', { count: counts.tagMembers ?? 0 }) },
+    { key: 'recipes', label: t('count.recipes'), value: counts.recipes },
+  ]
+  /** @type {Array<any>} */
+  const children = []
+  for (const [index, part] of parts.entries()) {
+    if (index > 0) children.push(h('span', { key: `${part.key}-sep`, className: 'atlas-count-sep' }, '·'))
+    children.push(
+      h(
+        'span',
+        { key: part.key, className: 'atlas-count' },
+        h('span', { className: 'atlas-count-label' }, part.label),
+        h('span', { className: 'atlas-count-value' }, String(part.value ?? 0)),
+        part.note === undefined ? undefined : h('span', { className: 'atlas-count-note' }, part.note),
+      ),
+    )
+  }
+  return h('div', { className: 'atlas-counts' }, children)
+}
+
+/**
+ * 表头：没有表头时字段含义不明确，尤其是注册名与命名空间分列之后。
+ * @param {string} kind
+ * @param {string} tag
+ * @param {number} matched
+ */
+function tableHead(kind, tag, matched) {
+  if (kind === 'registry') {
+    return h(
+      'div',
+      { className: 'atlas-thead atlas-row' },
+      h('span', undefined, t('col.name')),
+      h('span', undefined, t('col.namespace')),
+      h('span', undefined, t('col.props')),
+    )
+  }
+  if (kind === 'tag' && tag === '') {
+    return h(
+      'div',
+      { className: 'atlas-thead atlas-row atlas-row-tag' },
+      h('span', undefined, t('col.tag')),
+      h('span', { className: 'atlas-num' }, t('col.count')),
+    )
+  }
+  if (kind === 'tag') {
+    return h(
+      'div',
+      { className: 'atlas-thead' },
+      h('span', { className: 'atlas-thead-title', title: tag }, tag),
+      h('span', { className: 'atlas-count-note' }, t('panel.tagMembers', { count: matched })),
+    )
+  }
+  return h(
+    'div',
+    { className: 'atlas-thead atlas-row atlas-row-recipe' },
+    h('span', undefined, t('col.recipe')),
+    h('span', undefined, t('col.type')),
+    h('span', undefined, t('col.result')),
+    h('span', undefined, t('col.ingredients')),
+  )
+}
+
+/**
+ * 多工程时提供选择器。
  * @param {Record<string, any>} workspace
  * @param {Record<string, any> | undefined} project
  */
@@ -409,7 +516,7 @@ function projectSelector(workspace, project) {
   if (candidates.length <= 1) return undefined
   return h(
     'div',
-    { className: 'atlas-toolbar' },
+    { className: 'atlas-project-bar' },
     h('span', { className: 'atlas-hint' }, t('panel.project')),
     h(
       'select',
@@ -422,22 +529,11 @@ function projectSelector(workspace, project) {
         h(
           'option',
           { key: entry.root, value: entry.root },
-          `${entry.name ?? entry.root}${entry.loader === undefined ? '' : ` · ${entry.loader}`}${entry.mcVersion === undefined ? '' : ` ${entry.mcVersion}`}`,
+          `${entry.name ?? entry.root}${entry.loader === undefined ? '' : ` · ${loaderLabel(entry.loader)}`}${entry.mcVersion === undefined ? '' : ` ${entry.mcVersion}`}`,
         ),
       ),
     ),
   )
-}
-
-/**
- * @param {Record<string, any>} project
- * @returns {string}
- */
-function projectLabel(project) {
-  const parts = [String(project.name ?? project.root ?? '')]
-  if (typeof project.loader === 'string') parts.push(project.loader)
-  if (typeof project.mcVersion === 'string' && project.mcVersion !== '') parts.push(`MC ${project.mcVersion}`)
-  return parts.join(' · ')
 }
 
 /**
@@ -463,7 +559,7 @@ function exportButton(busy, disabled, hint, label, runExport) {
 }
 
 /**
- * 三种表格行。
+ * 三种表格行。注册表把 id 拆成"资源路径 + 命名空间"两列，与表头一致。
  * @param {string} kind
  * @param {string} tag
  * @param {Array<any>} items
@@ -476,9 +572,13 @@ function rowsOf(kind, tag, items, onPickTag) {
       h(
         'div',
         { key: item.id, className: 'atlas-row' },
-        h('span', { className: 'atlas-id', title: item.id }, shortId(item.id)),
+        h('span', { className: 'atlas-id', title: item.id }, pathOf(item.id)),
         h('span', { className: 'atlas-owner', title: item.owner }, item.owner),
-        h('span', { className: 'atlas-props', title: item.class ?? '' }, textOf([propsText(item.props), shortClass(item.class)])),
+        h(
+          'span',
+          { className: 'atlas-props', title: item.class ?? '' },
+          propsText(item.props) === '' ? '—' : propsText(item.props),
+        ),
       ),
     )
   }
@@ -500,8 +600,8 @@ function rowsOf(kind, tag, items, onPickTag) {
             }
           },
         },
-        h('span', { className: 'atlas-id' }, shortId(item.tag)),
-        h('span', { className: 'atlas-owner' }, String(item.count)),
+        h('span', { className: 'atlas-id' }, item.tag),
+        h('span', { className: 'atlas-num' }, String(item.count)),
       ),
     )
   }
@@ -509,38 +609,31 @@ function rowsOf(kind, tag, items, onPickTag) {
     return h(
       'div',
       { className: 'atlas-members' },
-      items.map((member) => h('span', { key: String(member), className: 'atlas-member' }, shortId(member))),
+      items.map((member) => h('span', { key: String(member), className: 'atlas-member' }, String(member))),
     )
   }
   return items.map((item) =>
     h(
       'div',
       { key: item.id, className: 'atlas-row atlas-row-recipe' },
-      h('span', { className: 'atlas-id', title: item.id }, shortId(item.id)),
-      h('span', { className: 'atlas-owner' }, String(item.type ?? '').replace(/^minecraft:/, '')),
+      h('span', { className: 'atlas-id', title: item.id }, item.id),
+      h('span', { className: 'atlas-owner', title: item.type ?? '' }, String(item.type ?? '').replace(/^minecraft:/, '')),
       h('span', { className: 'atlas-props' }, resultText(item.result)),
-      h('span', { className: 'atlas-props', title: (item.ingredients ?? []).flat().join(' ') }, ingredientsText(item.ingredients)),
+      h(
+        'span',
+        { className: 'atlas-props', title: (item.ingredients ?? []).flat().join(' ') },
+        ingredientsText(item.ingredients),
+      ),
     ),
   )
 }
 
 /**
- * 类名只留简单名：表格里 `Item` / `SwordItem` 比全限定名好读。
- * @param {unknown} name
- * @returns {string}
+ * @param {Record<string, any>} workspace
  */
-function shortClass(name) {
-  if (typeof name !== 'string' || name === '') return ''
-  const dot = name.lastIndexOf('.')
-  return dot < 0 ? name : name.slice(dot + 1)
-}
-
-/**
- * @param {Array<string>} parts
- * @returns {string}
- */
-function textOf(parts) {
-  return parts.filter((part) => part !== '').join(' · ')
+function findProject(workspace) {
+  const found = (workspace.projects ?? []).find((entry) => entry.root === workspace.selectedRoot)
+  return found ?? pickProject(workspace.projects, workspace.cwd)
 }
 
 /**

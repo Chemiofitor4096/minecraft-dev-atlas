@@ -153,3 +153,12 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
   14 秒完成、`exitCode 0`、计数与真机一致；服务端 client bundle 里包含 `data.projects`、
   `panel.noProject`、`hasNearbyMcProject`。
 - 合计 120 个测试全绿。
+
+### 面板界面（2026-11-21 修订）
+
+- 标题区不再铺环境：工程名 + loader/MC 版本片 + 数据量一行；完整环境在悬停提示里。
+- 表格有表头（注册名/命名空间/属性、标签/成员数、配方/类型/产物/材料）；注册表 id 按
+  `namespace:path` 拆成两列展示。
+- 行高 22px、表头固定、默认每页 100（可选 50/100/200）；页脚压成路径 + 时间一行。
+- 颜色只用 `--dsw-*`：工程名与数值主色、活动分段 accent 下划线、导出按钮 accent 描边、
+  过期/错误提示条使用状态色左边条。
