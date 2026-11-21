@@ -1,0 +1,59 @@
+{
+  "name": "minecraft-dev-atlas",
+  "version": "0.1.0",
+  "private": false,
+  "description": "DSH plugin that exports Minecraft registries, tags and recipes from a running dev server and answers token-cheap queries over them",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "engine",
+    "assets",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh_CN.md",
+    "CHANGELOG.md",
+    "AGENTS.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "minecraft",
+    "modding",
+    "registries",
+    "recipes",
+    "javaagent"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build-agent.mjs",
+    "build:agent": "node scripts/build-agent.mjs",
+    "prepack": "node scripts/build-agent.mjs --verify",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.1 || ^0.2.2-rc.1",
+    "minecraft-dev-starter": ">=0.3.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-sandbox": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
+    "@deepseek-ai/schemastery": "3.18.5"
+  }
+}

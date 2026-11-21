@@ -1,0 +1,5 @@
+# 宿主半边的 bundle patch：客户端半边由 dsh-client-modules 按 package.json 的 `dsh.client`
+# 声明自动扫描并挂载（0.1.x 还没有面板，等 M-A2 加）。
+- insert:
+    - id: atlas-host
+      name: 'minecraft-dev-atlas'

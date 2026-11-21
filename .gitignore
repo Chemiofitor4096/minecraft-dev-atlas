@@ -1,0 +1,8 @@
+node_modules/
+# 构建产物：客户端（M-A2 起）与 agent jar 都不进仓库，靠 prepack 现构建
+lib/
+assets/*.jar
+agent/build/
+agent/.gradle/
+test/tmp/
+*.log

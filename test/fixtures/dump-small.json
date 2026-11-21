@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-11-21T04:00:00.000Z",
+  "env": {
+    "via": "agent-boot",
+    "loader": "neoforge",
+    "loaderVersion": "21.1.266",
+    "mcVersion": "1.21.1",
+    "mappings": "mojmap",
+    "adapter": "neoforge/mojmap/1.21@1",
+    "side": "server",
+    "java": 21
+  },
+  "provenance": {
+    "projectRoot": "C:\\Projects\\Test",
+    "sourceHash": "sha256:fixture",
+    "durationMs": 7400
+  },
+  "truncated": false,
+  "truncatedSections": [],
+  "registries": {
+    "minecraft:item": {
+      "count": 4,
+      "entries": [
+        {
+          "id": "coalcraft:coal_dust",
+          "owner": "coalcraft",
+          "class": "net.minecraft.world.item.Item",
+          "props": { "maxStackSize": 64, "maxDamage": 0, "burnTime": null }
+        },
+        {
+          "id": "minecraft:coal",
+          "owner": "minecraft",
+          "class": "net.minecraft.world.item.Item",
+          "props": { "maxStackSize": 64, "maxDamage": 0, "burnTime": null }
+        },
+        {
+          "id": "minecraft:diamond_sword",
+          "owner": "minecraft",
+          "class": "net.minecraft.world.item.SwordItem",
+          "props": { "maxStackSize": 1, "maxDamage": 1561, "burnTime": null }
+        },
+        {
+          "id": "minecraft:oak_planks",
+          "owner": "minecraft",
+          "class": "net.minecraft.world.item.BlockItem",
+          "props": { "maxStackSize": 64, "maxDamage": 0, "burnTime": null }
+        }
+      ]
+    },
+    "minecraft:block": {
+      "count": 2,
+      "entries": [
+        {
+          "id": "minecraft:oak_planks",
+          "owner": "minecraft",
+          "class": "net.minecraft.world.level.block.Block",
+          "props": { "hardness": 2 }
+        },
+        {
+          "id": "minecraft:stone",
+          "owner": "minecraft",
+          "class": "net.minecraft.world.level.block.Block",
+          "props": { "hardness": 1.5 }
+        }
+      ]
+    },
+    "minecraft:enchantment": {
+      "count": 1,
+      "entries": [
+        {
+          "id": "minecraft:sharpness",
+          "owner": "minecraft",
+          "class": "net.minecraft.world.item.enchantment.Enchantment",
+          "props": {}
+        }
+      ]
+    }
+  },
+  "tags": {
+    "minecraft:item": {
+      "minecraft:coals": ["minecraft:coal"],
+      "minecraft:planks": ["minecraft:oak_planks"]
+    },
+    "minecraft:block": {
+      "minecraft:mineable/axe": ["minecraft:oak_planks"]
+    },
+    "minecraft:fluid": {}
+  },
+  "recipes": {
+    "count": 2,
+    "entries": [
+      {
+        "id": "coalcraft:coal_block_from_dust",
+        "type": "minecraft:crafting_shapeless",
+        "result": { "item": "minecraft:coal_block", "count": 1 },
+        "ingredients": [["coalcraft:coal_dust", "coalcraft:coal_dust", "coalcraft:coal_dust"]],
+        "json": null
+      },
+      {
+        "id": "minecraft:oak_planks",
+        "type": "minecraft:crafting_shaped",
+        "result": { "item": "minecraft:oak_planks", "count": 4 },
+        "ingredients": [["minecraft:oak_log"]],
+        "json": null
+      }
+    ]
+  },
+  "warnings": ["item.burnTime 在 neoforge/mojmap/1.21@1 上没有可读入口，全部记 null"],
+  "errors": []
+}

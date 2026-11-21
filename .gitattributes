@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# 模板与脚本的行尾不能随 Windows 的 core.autocrlf 走
+agent/gradlew text eol=lf
+agent/gradlew.bat text eol=crlf
+
+*.jar binary
