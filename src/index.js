@@ -104,7 +104,7 @@ export function apply(ctx) {
   const missing = REQUIRED_CAPABILITIES.filter((capability) => !capabilities.includes(capability))
   if (missing.length > 0) {
     throw new Error(
-      `SERVICE_VERSION_MISMATCH: 需要 minecraft-dev-starter ≥ 0.3（ctx.mcdev.capabilities 里缺 ${missing.join(' / ')}；当前是 ${mcdev?.version ?? '未知版本'}）`,
+      `SERVICE_VERSION_MISMATCH: 需要 minecraft-dev-starter ≥ 0.3（ctx.mcdev.capabilities 缺少 ${missing.join(' / ')}；当前版本 ${mcdev?.version ?? '未知'}）`,
     )
   }
 

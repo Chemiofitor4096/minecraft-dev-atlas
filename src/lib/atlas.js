@@ -28,7 +28,7 @@ export function createAtlas(deps) {
   async function loadIndex(root) {
     const file = await readDumpText(root)
     if (file === undefined) {
-      fail('NO_DATA', `${root} 还没有导出过数据（先调用 mc_data_dump）`, { path: dumpPath(root) })
+      fail('NO_DATA', `${root} 尚未导出数据；请先调用 mc_data_dump。`, { path: dumpPath(root) })
     }
     const stat = await fs.stat(file.path)
     const cached = indexCache.get(file.path)
@@ -40,7 +40,7 @@ export function createAtlas(deps) {
       dump = parseDump(file.text)
     } catch (error) {
       const atlasError = /** @type {AtlasError} */ (error)
-      fail(atlasError.code ?? 'ATLAS_SCHEMA_MISMATCH', `缓存里的 dump 读不了：${atlasError.message}`, { path: file.path })
+      fail(atlasError.code ?? 'ATLAS_SCHEMA_MISMATCH', `缓存中的 dump 无法读取：${atlasError.message}`, { path: file.path })
     }
     const index = indexDump(dump)
     indexCache.set(file.path, { mtimeMs: stat.mtimeMs, size: stat.size, index })

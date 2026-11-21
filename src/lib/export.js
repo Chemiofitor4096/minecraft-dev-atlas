@@ -62,7 +62,7 @@ export async function exportDump(deps, args = {}) {
   }
 
   if (!looksLikeGradleProject(root)) {
-    fail('NO_RUN_TARGET', `${root} 不是 Gradle 工程（没有 build.gradle / settings.gradle / gradlew）：数据只能从运行中的服务端导出`)
+    fail('NO_RUN_TARGET', `${root} 不是 Gradle 工程（缺少 build.gradle、settings.gradle 或 gradlew）；数据需从运行中的服务端导出。`)
   }
 
   const fingerprint = await sourceFingerprint(root)
@@ -85,7 +85,7 @@ export async function exportDump(deps, args = {}) {
         durationMs: Date.now() - startedAt,
       }
       if (fingerprint.truncated) {
-        value.note = '工程文件超过指纹上限，缓存可能漏掉新改动（用 refresh 重导）'
+        value.note = '工程文件超过指纹上限，缓存可能遗漏新增改动（使用 refresh 重新导出）'
       }
       return value
     }
@@ -93,11 +93,11 @@ export async function exportDump(deps, args = {}) {
 
   const agentJar = deps.jarPath ?? jarPath()
   if (!existsSync(agentJar)) {
-    fail('AGENT_BUILD_MISSING', `找不到 agent jar：${agentJar}（本地开发先跑 npm run build）`)
+    fail('AGENT_BUILD_MISSING', `未找到 agent jar：${agentJar}（本地开发请先执行 npm run build）。`)
   }
   const jarVersion = deps.jarVersion ?? readJarVersion(agentJar)
   if (typeof jarVersion === 'string' && jarVersion !== deps.version) {
-    fail('AGENT_BUILD_MISSING', `agent jar 是 ${jarVersion}，插件包是 ${deps.version}：先重新构建（npm run build），否则会出现"包升了、jar 还是旧的"`)
+    fail('AGENT_BUILD_MISSING', `agent jar 版本为 ${jarVersion}，插件包版本为 ${deps.version}；请重新构建（npm run build），避免插件包与 jar 版本不一致。`)
   }
 
   const out = dumpPath(root)
@@ -107,7 +107,7 @@ export async function exportDump(deps, args = {}) {
   const instances = await safeList(mcdev, { root, workspace: args.workspace })
   const running = instances.find((entry) => entry?.status === 'starting' || entry?.status === 'running')
   if (running !== undefined) {
-    fail('ALREADY_RUNNING', `这个工程已经有实例 ${running.id}（${running.taskPath}）在跑；先停止再导出`, {
+    fail('ALREADY_RUNNING', `该工程已有运行中的实例 ${running.id}（${running.taskPath}）；请先停止该实例，再执行导出。`, {
       launch: { id: running.id, status: running.status, taskPath: running.taskPath },
     })
   }
@@ -169,7 +169,7 @@ export async function exportDump(deps, args = {}) {
       : []
     throw new AtlasError(
       'ATLAS_SCHEMA_MISMATCH',
-      `${schemaError.message}\n问题：${problems.join('；') || '（无更多细节）'}\ndump: ${dumpFile.path}\n${tail(logText)}`,
+      `${schemaError.message}\n问题列表：${problems.join('；') || '（无更多细节）'}\ndump: ${dumpFile.path}\n${tail(logText)}`,
       { path: dumpFile.path, problems },
     )
   }
@@ -219,10 +219,10 @@ export async function exportDump(deps, args = {}) {
     launch,
     durationMs: Date.now() - startedAt,
     ...(partial
-      ? { note: '导出不完整：看 errors[] 里失败的段落，日志尾巴能定位到具体原因' }
+      ? { note: '导出不完整：请查看 errors[] 中失败的段落，日志末尾可定位具体原因' }
       : {}),
     ...(fingerprint.truncated
-      ? { fingerprintTruncated: true, note: '工程文件超过指纹上限，下次可能误判缓存（用 refresh 强制重导）' }
+      ? { fingerprintTruncated: true, note: '工程文件超过指纹上限，下次可能误判缓存（使用 refresh 强制重新导出）' }
       : {}),
   }
 }
@@ -257,7 +257,7 @@ async function resolveWorkspaceProject(mcdev, workspace) {
   }
   fail(
     'NO_RUN_TARGET',
-    `工作区 ${scanned?.root ?? workspace ?? ''} 里有多个可导出的工程（${candidates.length} 个）：${candidates.slice(0, 8).map((entry) => entry.project.root).join('、')}${candidates.length > 8 ? '…' : ''}；用 root 指明其中一个`,
+    `工作区 ${scanned?.root ?? workspace ?? ''} 中存在多个可导出的工程（${candidates.length} 个）：${candidates.slice(0, 8).map((entry) => entry.project.root).join('、')}${candidates.length > 8 ? '…' : ''}。请通过 root 指定其中一个。`,
   )
 }
 
@@ -298,7 +298,7 @@ function normalizeSections(value) {
     if (typeof entry !== 'string') continue
     const section = entry.trim()
     if (!['registries', 'tags', 'recipes'].includes(section)) {
-      fail('BAD_REQUEST', `未知段落 ${JSON.stringify(entry)}（可用：registries / tags / recipes）`)
+      fail('BAD_REQUEST', `未知段落 ${JSON.stringify(entry)}（可用值：registries、tags、recipes）。`)
     }
     if (!sections.includes(section)) sections.push(section)
   }
@@ -312,7 +312,7 @@ function normalizeSections(value) {
 function normalizeTaskPath(value) {
   if (value === undefined || value === null || value === '') return 'runServer'
   if (typeof value !== 'string' || !TASK_PATH_PATTERN.test(value)) {
-    fail('BAD_REQUEST', `taskPath 只能是 Gradle 任务路径（例如 runServer 或 :fabric:runServer），收到 ${JSON.stringify(value)}`)
+    fail('BAD_REQUEST', `taskPath 必须是 Gradle 任务路径（例如 runServer 或 :fabric:runServer），收到 ${JSON.stringify(value)}。`)
   }
   return value
 }
@@ -328,7 +328,7 @@ function translateLaunchError(error, context) {
   if (code === 'BAD_TASK') {
     return new AtlasError(
       'NO_RUN_TARGET',
-      `${context.root} 没有 ${context.taskPath} 这个目标（NeoForge 工程的 runs 块里要有 server；多模块工程用 taskPath 指到具体模块）`,
+      `${context.root} 缺少 ${context.taskPath} 目标（NeoForge 工程的 runs 块中需包含 server；多模块工程请用 taskPath 指向具体模块）。`,
       { cause: atlas.message },
     )
   }
@@ -346,18 +346,18 @@ function translateLaunchError(error, context) {
 function classifyMissingDump(input) {
   const { record, markers, logText, taskPath, root } = input
   const launch = launchValue(record, { timedOut: record?.timedOut === true })
-  const detail = `\nlaunch: ${JSON.stringify(launch)}\n日志尾巴：\n${tail(logText)}`
+  const detail = `\nlaunch: ${JSON.stringify(launch)}\n日志末尾：\n${tail(logText)}`
 
   const taskMissing = /Task ['"][^'"]+' not found|Cannot locate tasks that match/i.test(logText)
   if (taskMissing) {
-    return new AtlasError('NO_RUN_TARGET', `${root} 没有 ${taskPath} 这个目标（Gradle 报 Task not found）${detail}`, { launch })
+    return new AtlasError('NO_RUN_TARGET', `${root} 缺少 ${taskPath} 目标（Gradle 报 Task not found）。${detail}`, { launch })
   }
 
   const unsupported = markers.find((marker) => marker.kind === 'unsupported')
   if (unsupported !== undefined) {
     return new AtlasError(
       'ATLAS_UNSUPPORTED',
-      `这个运行时没有可用的 adapter：loader=${unsupported.loader} mappings=${unsupported.mappings} mc=${unsupported.mc}（${unsupported.reason}）${detail}`,
+      `当前运行时没有可用的 adapter：loader=${unsupported.loader} mappings=${unsupported.mappings} mc=${unsupported.mc}（${unsupported.reason}）。${detail}`,
       { env: { loader: unsupported.loader, mappings: unsupported.mappings, mcVersion: unsupported.mc }, launch },
     )
   }
@@ -365,28 +365,28 @@ function classifyMissingDump(input) {
   const ready = markers.find((marker) => marker.kind === 'ready')
   const inert = markers.find((marker) => marker.kind === 'inert')
   if (ready === undefined) {
-    const reason = inert === undefined ? '日志里根本没有 [mcdev-atlas] 标记' : `Agent 在这个进程里 inert（${inert.reason}）`
+    const reason = inert === undefined ? '日志中没有 [mcdev-atlas] 标记' : `Agent 在该进程中处于 inert 状态（${inert.reason}）`
     return new AtlasError(
       'ATLAS_NOT_LOADED',
-      `服务端起来了，但 Agent 没生效：${reason}。常见原因：starter 没把 JAVA_TOOL_OPTIONS 传进游戏 JVM。${detail}`,
+      `服务端已启动，但 Agent 未生效：${reason}。常见原因：starter 未将 JAVA_TOOL_OPTIONS 传入游戏 JVM。${detail}`,
       { launch, markers },
     )
   }
 
   if (record?.timedOut === true) {
-    return new AtlasError('ATLAS_TIMEOUT', `等导出超时，且没有拿到 dump（Agent 已经 ready，可能卡在取数或写盘）${detail}`, { launch })
+    return new AtlasError('ATLAS_TIMEOUT', `等待导出超时，且未生成 dump（Agent 已就绪，可能阻塞在取数或写盘阶段）。${detail}`, { launch })
   }
   if (record?.outcome !== undefined && record.outcome !== null && record.outcome !== 'normal') {
     return new AtlasError(
       'LAUNCH_FAILED',
-      `服务端以 ${record.outcome}（退出码 ${record.exitCode ?? '未知'}）结束，没有产出 dump${detail}`,
+      `服务端以 ${record.outcome}（退出码 ${record.exitCode ?? '未知'}）结束，未生成 dump。${detail}`,
       { launch },
     )
   }
   const failed = markers.filter((marker) => marker.kind === 'failed')
   const failureText = failed.length > 0
-    ? `Agent 的失败行：${failed.map((marker) => `${marker.stage ?? '?'}=${marker.error ?? '?'}`).join('；')}`
-    : 'Agent 打了 ready 但没有写出 dump'
+    ? `Agent 的失败记录：${failed.map((marker) => `${marker.stage ?? '?'}=${marker.error ?? '?'}`).join('；')}`
+    : 'Agent 记录了 ready，但未写出 dump'
   return new AtlasError('ATLAS_NO_DUMP', `${failureText}${detail}`, { launch, markers })
 }
 

@@ -93,7 +93,7 @@ export function parseManifest(text) {
 export function readJarManifest(path = jarPath()) {
   const buffer = readFileSync(path)
   const entry = readZipEntry(buffer, 'META-INF/MANIFEST.MF')
-  if (entry === undefined) throw new Error(`jar 里没有 META-INF/MANIFEST.MF：${path}`)
+  if (entry === undefined) throw new Error(`jar 内缺少 META-INF/MANIFEST.MF：${path}`)
   return parseManifest(entry)
 }
 

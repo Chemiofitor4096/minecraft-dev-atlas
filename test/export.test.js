@@ -149,7 +149,7 @@ test('没写出 dump、日志里也没有标记 → ATLAS_NOT_LOADED', async (t)
     () => exportDump(deps, { root: project }),
     (error) => {
       assert.equal(error.code, 'ATLAS_NOT_LOADED')
-      assert.match(error.message, /Agent 没生效/)
+      assert.match(error.message, /Agent 未生效/)
       return true
     },
   )

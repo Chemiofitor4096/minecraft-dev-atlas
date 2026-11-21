@@ -81,6 +81,9 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 
 其他约定：
 
+- **文案语体**：README、面板文案与面向用户的错误消息统一使用书面语。避免“点一下 / 取出来 / 跑起来 /
+  没有了”这类口语表达，也不对读者使用第二人称说教；技术名词保持原样（dump、schema、token、loader）。
+  工具描述仍是英文契约，工具执行结果（render）仍是中文。
 - **工具描述英文、render 中文**；描述一到两句（是什么 + 最容易踩的约束），参数与返回交给 schema。
 - **两个工具都按步挂载**：工作区（或直接子目录）里有 `build.gradle* / settings.gradle* / gradlew*` 才挂；
   判不出来按可见处理。判定按 cwd 缓存 60 秒，导出成功后清缓存。
