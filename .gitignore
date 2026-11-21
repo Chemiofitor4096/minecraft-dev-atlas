@@ -7,3 +7,4 @@ agent/build/
 agent/.gradle/
 test/tmp/
 *.log
+*.tgz
