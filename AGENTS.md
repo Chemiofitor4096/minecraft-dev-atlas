@@ -121,5 +121,9 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
   外壳 id、cordis 形状、按钮 / 标签类型 / 正文 / 标题 chip 四处注册、样式只注入一次。
 - `test/host.test.js` 用假 req/res 真打路由：ping、data.state、data.query（读真 dump）、
   未知方法 404、GET 非 ping 405、client.report、data.dump 的失败码透传。
+- 真 web 运行时（临时 profile `atlas-web-smoke` = base + web-app + starter + atlas）：
+  启动日志出现 `[mcdev] http routes mounted at /mcdev/api` 与 `[mcdev-atlas] http routes mounted at /atlas/api`，
+  `GET /atlas/api/ping` 200；页面 preload 列表包含 `minecraft-dev-atlas/client.js`，
+  合并后的 client bundle 里能找到 `id: 'minecraft-dev-atlas'`、`.atlas-panel`、`minecraft-dev-atlas:data-button`。
 - 合计 98 个测试全绿。
-- 尚未做：真机面板的视觉冒烟（要把它装进 desktop profile 并重启 DSH，会打断当前会话）。
+- 尚未做：真机面板的视觉冒烟（需要装在 desktop / mc-dev-starter profile 并重启 DSH 后用眼睛看）。
