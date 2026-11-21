@@ -106,3 +106,56 @@ export function readJarVersion(path = jarPath()) {
   const manifest = readJarManifest(path)
   return typeof manifest['Implementation-Version'] === 'string' ? manifest['Implementation-Version'] : undefined
 }
+
+/** agent 允许跑在的最低 JVM：Java 17（class 文件 61）。见 agent/build.gradle.kts 的注释。 */
+export const MAX_CLASS_MAJOR = 61
+
+/**
+ * 列出 jar 里每个 class 条目的字节码主版本号。
+ *
+ * 用途是守卫：agent 跑在游戏 JVM 里，按 target 编译却跑到更低版本 JVM 上时，
+ * premain 会在 `UnsupportedClassVersionError` 里让整个游戏起不来——而那是最难把
+ * "Atlas 没生效" 和 "游戏本身坏了" 分开的一类故障。所以构建期就要拦。
+ * @param {string} [path]
+ * @returns {Array<{ name: string, major: number }>}
+ */
+export function readClassVersions(path = jarPath()) {
+  const buffer = readFileSync(path)
+  const eocd = findEndOfCentralDirectory(buffer)
+  if (eocd === undefined) throw new Error(`不是有效的 zip：${path}`)
+  const entryCount = buffer.readUInt16LE(eocd + 10)
+  let offset = buffer.readUInt32LE(eocd + 16)
+  /** @type {Array<{ name: string, major: number }>} */
+  const versions = []
+  for (let index = 0; index < entryCount; index += 1) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) break
+    const method = buffer.readUInt16LE(offset + 10)
+    const compressedSize = buffer.readUInt32LE(offset + 20)
+    const nameLength = buffer.readUInt16LE(offset + 28)
+    const extraLength = buffer.readUInt16LE(offset + 30)
+    const commentLength = buffer.readUInt16LE(offset + 32)
+    const localOffset = buffer.readUInt32LE(offset + 42)
+    const entryName = buffer.toString('utf8', offset + 46, offset + 46 + nameLength)
+    if (entryName.endsWith('.class')) {
+      const localNameLength = buffer.readUInt16LE(localOffset + 26)
+      const localExtraLength = buffer.readUInt16LE(localOffset + 28)
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength
+      const raw = buffer.subarray(dataStart, dataStart + compressedSize)
+      const data = method === 0 ? raw : inflateRawSync(raw)
+      // class 文件头：u4 magic, u2 minor, u2 major
+      if (data.length >= 8) versions.push({ name: entryName, major: data.readUInt16BE(6) })
+    }
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+  return versions
+}
+
+/**
+ * 找出超过上限的 class；空数组表示合规。
+ * @param {Array<{ name: string, major: number }>} versions
+ * @param {number} [limit]
+ * @returns {Array<{ name: string, major: number }>}
+ */
+export function classVersionsAbove(versions, limit = MAX_CLASS_MAJOR) {
+  return versions.filter((entry) => entry.major > limit)
+}

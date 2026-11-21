@@ -11,7 +11,7 @@ DSH 插件：带 Java Agent 起一次 headless 服务端，把注册表 / 标签
 
 - 宿主侧：ESM、无 TypeScript、JSDoc；Node ≥ 20；
 - 查询引擎：纯函数、零依赖（`engine/`）；
-- Agent：Java 21、Gradle、零第三方运行时依赖；**骨架里没有一处游戏类名**，映射只存在 adapter 里。
+- Agent：Java 17（class 文件 61）、Gradle、零第三方运行时依赖；**骨架里没有一处游戏类名**，映射只存在 adapter 里。
 
 ## 目录
 
@@ -51,7 +51,7 @@ test/                   node --test；fixtures/dump-small.json 是引擎夹具
 
 ```powershell
 node --test                                   # 全部测试（Node 20 不认 glob，别写 test/*.test.js）
-npm run build                                 # agent jar + 客户端（要 JDK 21）
+npm run build                                 # agent jar + 客户端（要 JDK 17+）
 npm run build:client                          # 只构建客户端（改 src/client 后至少跑这个）
 node scripts/build-agent.mjs --skip-build     # 只拷贝 + 校验（CI 已构建过时）
 node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出

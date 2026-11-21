@@ -4,7 +4,7 @@
 
 首版：把运行中的 Minecraft 数据导出来，人能翻、模型能查。
 
-### Agent（`assets/mcdev-atlas.jar`，Java 21，零第三方依赖）
+### Agent（`assets/mcdev-atlas.jar`，Java 17，零第三方依赖）
 
 - 骨架：`premain` / `agentmain`、参数解析（`out/sections/stop/timeout/max/loader/mappings/root/sourcehash`）、
   超时、tmp + rename 写盘、`[mcdev-atlas]` 单行事件日志；骨架里没有一处游戏类名。
@@ -17,6 +17,10 @@
 - 停服走 `/stop` 同一条路（`halt(false)`），保存交给服务端主线程，Gradle 干净退出（退出码 0）。
 - 缺字段进 `warnings[]`（例如 1.21.1 读不到 `item.burnTime`），单段失败进 `errors[]` 且该段
   `count: 0`。
+- **产物面向 Java 17（class 文件 61），不再要求游戏跑在 Java 21 上**：agent 跑在游戏 JVM 里，
+  原先按 21 编译的 jar 遇到 1.20.1 那代 Java 17 会在 `premain` 抛 `UnsupportedClassVersionError`
+  并把整个游戏弄挂（看起来像"Atlas 没生效"）。class 版本向下兼容，61 在 21/25 的 JVM 上照常加载。
+  `build-agent.mjs` 与 `test/jar.test.js` 现在都守卫这个上限，构建期就会拦下退回高版本的改动。
 
 ### 宿主（DSH bundle）
 
