@@ -100,8 +100,9 @@ node scripts/e2e-export.mjs C:\Projects\Test   # real export through the host pa
 
 - **M-A1 (done)**: agent skeleton, NeoForge/mojmap adapter, `mc_data_dump`, cache + schema validation.
   Verified on `C:\Projects\Test` (NeoForge 21.1.266 / MC 1.21.1): 1339 items, 1060 blocks, 707 tags
-  (6891 members), 1290 recipes, `errors: []`.
-- **M-A2 (next)**: `mc_data_query` + digest (the engine and the tool exist; panel tab pending).
+  (6891 members), 1290 recipes, `errors: []`. Cached re-export: 12 ms.
+- **M-A2 (partly done)**: `mc_data_query` + digest are implemented and measured (digest ≈ 138 tokens,
+  50 registry rows ≈ 499 tokens); the panel's data tab is still pending.
 - M-A3 (optional): attach mode, Fabric/yarn adapter, full recipe JSON.
 
 ## License
