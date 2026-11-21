@@ -410,11 +410,13 @@ function DataTabBody({ cwd }) {
  * @param {string | undefined} workspaceCwd
  */
 function contextHeader(project, digest, workspaceCwd) {
-  const name = project?.name ?? project?.root ?? workspaceCwd ?? t('tab.data')
+  // 优先模组名（与 Mod Dev 面板一致），没有元数据时退回工程目录名
+  const name = project?.modName ?? project?.name ?? project?.root ?? workspaceCwd ?? t('tab.data')
+  const title = [project?.name, project?.root].filter((value) => typeof value === 'string' && value !== '').join('\n')
   const chip = projectChip(project, digest)
   return h(
     'div',
-    { className: 'atlas-context', title: String(project?.root ?? workspaceCwd ?? '') },
+    { className: 'atlas-context', title: title === '' ? String(workspaceCwd ?? '') : title },
     h(
       'div',
       { className: 'atlas-context-main' },

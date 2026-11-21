@@ -32,6 +32,7 @@ export const CSS = `
   gap: 6px;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   box-sizing: border-box;
   padding: 8px 10px;
   color: var(--dsw-alias-label-primary);
@@ -159,7 +160,7 @@ export const CSS = `
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  min-height: 90px;
+  min-height: 0;
   border-top: 1px solid var(--dsw-alias-hairline);
   border-bottom: 1px solid var(--dsw-alias-hairline);
 }
@@ -225,6 +226,7 @@ export const CSS = `
 
 .atlas-pager {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
@@ -237,6 +239,7 @@ export const CSS = `
 
 .atlas-foot {
   display: flex;
+  flex: none;
   align-items: baseline;
   gap: 4px;
   overflow: hidden;
