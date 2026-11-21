@@ -1,6 +1,7 @@
 package dev.mcdev.atlas;
 
 import java.io.InputStream;
+import java.lang.instrument.Instrumentation;
 import java.util.Properties;
 
 /**
@@ -56,6 +57,37 @@ public final class Detect {
             return "mojmap";
         }
         if (Reflect.findClass("net.minecraft.registry.Registries", loader) != null) {
+            return "yarn";
+        }
+        return null;
+    }
+
+    /**
+     * 不触发类加载的 loader 判定。
+     *
+     * 只在 {@link Instrumentation#getAllLoadedClasses()} 的结果里找——转换窗口里用
+     * {@code Class.forName} 探测会把 ModLauncher 的转换链扯进来，弄挂 Forge 的事件总线
+     * （见 {@link Reflect#loadedClassLoader} 的注释）。
+     */
+    public static String loaderOf(Instrumentation instrumentation) {
+        if (Reflect.isLoaded(instrumentation, "net.neoforged.neoforge.server.ServerLifecycleHooks")) {
+            return "neoforge";
+        }
+        if (Reflect.isLoaded(instrumentation, "net.minecraftforge.server.ServerLifecycleHooks")) {
+            return "forge";
+        }
+        if (Reflect.isLoaded(instrumentation, "net.fabricmc.loader.api.FabricLoader")) {
+            return "fabric";
+        }
+        return null;
+    }
+
+    /** 不触发类加载的映射判定，规则同 {@link #loaderOf}。 */
+    public static String mappingsOf(Instrumentation instrumentation) {
+        if (Reflect.isLoaded(instrumentation, "net.minecraft.core.registries.BuiltInRegistries")) {
+            return "mojmap";
+        }
+        if (Reflect.isLoaded(instrumentation, "net.minecraft.registry.Registries")) {
             return "yarn";
         }
         return null;

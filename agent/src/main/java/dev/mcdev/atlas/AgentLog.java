@@ -1,14 +1,25 @@
 package dev.mcdev.atlas;
 
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+
 /**
  * 一行一个事件、键值对形式的日志。
  *
  * 宿主按 {@code [mcdev-atlas]} 前缀 grep 这些行做进度与归因（见 doc/拓展-MC数据导出.md §3.2）。
  * 约定：值里不允许出现空格，切分只看空白，因此这里统一把空白折成下划线。
+ *
+ * **编码**：事件全部走 UTF-8。JVM 的默认 `stdout` 在 Windows 上取控制台代码页（GBK），
+ * 而 Gradle 的日志管道按 UTF-8 解，中文原因就会变成 `û��_forge/mojmap/1.20` 这样的乱码——
+ * 恰好把最需要读的那句（为什么这个运行时不受支持）毁掉了。所以这里显式包一层 UTF-8 流，
+ * 不依赖 `file.encoding` 或控制台设置。
  */
 public final class AgentLog {
     /** 固定的行前缀，宿主与面板都按它过滤。 */
     public static final String PREFIX = "[mcdev-atlas] ";
+
+    /** UTF-8 的事件出口；`System.out` 本身保持不动（别人可能还要往它写）。 */
+    private static final PrintStream OUT = new PrintStream(System.out, true, StandardCharsets.UTF_8);
 
     private AgentLog() {
     }
@@ -17,8 +28,8 @@ public final class AgentLog {
     public static void event(String kind, String... pairs) {
         StringBuilder line = new StringBuilder(PREFIX).append(kind);
         appendPairs(line, pairs);
-        System.out.println(line);
-        System.out.flush();
+        OUT.println(line);
+        OUT.flush();
     }
 
     /**
@@ -28,8 +39,8 @@ public final class AgentLog {
     public static void eventNamed(String kind, String name, String... pairs) {
         StringBuilder line = new StringBuilder(PREFIX).append(kind).append(' ').append(value(name));
         appendPairs(line, pairs);
-        System.out.println(line);
-        System.out.flush();
+        OUT.println(line);
+        OUT.flush();
     }
 
     private static void appendPairs(StringBuilder line, String... pairs) {

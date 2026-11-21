@@ -25,6 +25,14 @@ public final class AtlasAgent {
     /** 等游戏类出现的最长时间。类加载通常几秒内就发生，60 秒是给巨大整合包留的余量。 */
     private static final long GAME_CLASS_WAIT_MS = 60_000L;
 
+    /**
+     * 等 loader / mappings 的探针类进已加载清单的最长时间。
+     *
+     * 这两类类在事件总线装完之后才会被加载；用 {@code Class.forName} 去催会在转换窗口里
+     * 制造 classloader 冲突，所以宁可等也不催。
+     */
+    private static final long DETECT_WAIT_MS = 120_000L;
+
     private AtlasAgent() {
     }
 
@@ -55,8 +63,37 @@ public final class AtlasAgent {
             return;
         }
 
-        String loader = Detect.loader(gameLoader);
-        String mappings = Detect.mappings(gameLoader);
+        // 判定**只**走"扫描已加载清单"：转换窗口里用 Class.forName 探会把 ModLauncher 的
+        // 转换链扯进来，实测让 Forge 的事件总线在算监听器列表时抛
+        // "NoSuchMethodException: ServerAboutToStartEvent.<init>()"，整个服务端加载失败。
+        // 清单里没有就先等——事件总线启动完成后这些类一定会被加载，等到的代价远小于弄挂一局。
+        String loader = null;
+        String mappings = null;
+        long detectDeadline = System.currentTimeMillis() + DETECT_WAIT_MS;
+        while (System.currentTimeMillis() < detectDeadline) {
+            if (loader == null) {
+                loader = Detect.loaderOf(instrumentation);
+            }
+            if (mappings == null) {
+                mappings = Detect.mappingsOf(instrumentation);
+            }
+            if (loader != null && mappings != null) {
+                break;
+            }
+            try {
+                Thread.sleep(200L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                AgentLog.event("inert", "reason", "interrupted");
+                return;
+            }
+        }
+        if (loader == null || mappings == null) {
+            AgentLog.event("inert", "reason", "loader-or-mappings-not-loaded",
+                    "loader", loader == null ? "unknown" : loader,
+                    "mappings", mappings == null ? "unknown" : mappings);
+            return;
+        }
         String mcVersion = Detect.mcVersion(gameLoader);
 
         DataAdapter adapter;
@@ -214,19 +251,45 @@ public final class AtlasAgent {
         return total;
     }
 
-    /** 单 section 上限：注册表按条目总数截，截断要显式记在 truncatedSections 里。 */
+    /**
+     * 单 section 上限：注册表按条目总数截，截断要显式记在 truncatedSections 里。
+     *
+     * 关键是**不能让前面的注册表把配额吃光**：这里按"均分 + 余量补足"分配，
+     * 保证每张注册表都能拿到自己那份。否则物品(13079)+方块(6921)一满 20000，
+     * entity_type / fluid / mob_effect / enchantment 就全是 0 —— 看起来像读不到，
+     * 实际是被前面的挤没了。这类"缺数据却看着像没配"的故障最难查。
+     */
     private static List<DataAdapter.RegistryView> capRegistries(List<DataAdapter.RegistryView> views, int max,
                                                                  List<String> truncated) {
-        int remaining = max;
+        if (views.isEmpty()) {
+            return views;
+        }
+        // 每张表的保底配额：均分；太小的表占不满时，余量再按顺序补给大表
+        int share = Math.max(1, max / views.size());
+        int[] budget = new int[views.size()];
+        int assigned = 0;
+        for (int index = 0; index < views.size(); index += 1) {
+            int wanted = views.get(index).entries().size();
+            budget[index] = Math.min(wanted, share);
+            assigned += budget[index];
+        }
+        int leftover = max - assigned;
+        for (int index = 0; index < views.size() && leftover > 0; index += 1) {
+            int wanted = views.get(index).entries().size();
+            int extra = Math.min(leftover, wanted - budget[index]);
+            budget[index] += extra;
+            leftover -= extra;
+        }
+
         boolean capped = false;
         List<DataAdapter.RegistryView> cappedViews = new ArrayList<>(views.size());
-        for (DataAdapter.RegistryView view : views) {
+        for (int index = 0; index < views.size(); index += 1) {
+            DataAdapter.RegistryView view = views.get(index);
             List<DataAdapter.RegistryEntry> entries = view.entries();
-            if (entries.size() > remaining) {
-                entries = new ArrayList<>(entries.subList(0, Math.max(0, remaining)));
+            if (entries.size() > budget[index]) {
+                entries = new ArrayList<>(entries.subList(0, budget[index]));
                 capped = true;
             }
-            remaining -= entries.size();
             cappedViews.add(new DataAdapter.RegistryView(view.id(), entries));
         }
         if (capped) {
