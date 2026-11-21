@@ -160,5 +160,8 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 - 表格有表头（注册名/命名空间/属性、标签/成员数、配方/类型/产物/材料）；注册表 id 按
   `namespace:path` 拆成两列展示。
 - 行高 22px、表头固定、默认每页 100（可选 50/100/200）；页脚压成路径 + 时间一行。
+- 表格用 `flex: 1 1 auto; min-height: 0`（不是 `min-height: 90px`），否则侧栏变矮时表格不肯收缩，
+  会把页脚挤出可视区；面板本身 `overflow: hidden`。
+- 标题优先用 `project.modName`，退回目录名；完整路径与环境放悬停提示。
 - 颜色只用 `--dsw-*`：工程名与数值主色、活动分段 accent 下划线、导出按钮 accent 描边、
   过期/错误提示条使用状态色左边条。
