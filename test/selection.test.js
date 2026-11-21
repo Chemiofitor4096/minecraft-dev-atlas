@@ -120,3 +120,25 @@ test('pickProject：近处工程优先于扫描深度里的模板/夹具', () =>
   // 只有深层工程时仍返回它（面板会按"没有近处工程"隐藏入口）
   assert.equal(pickProject([deep], 'C:\\Projects\\Test').name, 'fixture')
 })
+
+test('nearbyMcProjects：同一 Gradle 构建的嵌套模块算当前工作区', () => {
+  const cwd = 'C:\\Projects\\Multi'
+  const nested = {
+    root: 'C:\\Projects\\Multi\\modules\\core',
+    name: 'core',
+    kind: 'mod',
+    gradleRoot: 'C:\\Projects\\Multi',
+    runTargets: [{ taskPath: ':modules:core:runServer', kind: 'server' }],
+  }
+  const template = {
+    root: 'C:\\Projects\\Multi\\templates\\fabric',
+    name: 'template',
+    kind: 'mod',
+    gradleRoot: 'C:\\Projects\\Multi\\templates\\fabric',
+  }
+  assert.deepEqual(nearbyMcProjects([nested], cwd), [nested])
+  assert.deepEqual(nearbyMcProjects([template], cwd), [])
+  assert.equal(hasNearbyMcProject([nested], cwd), true)
+  assert.equal(hasNearbyMcProject([template], cwd), false)
+  assert.equal(pickProject([nested], cwd).name, 'core')
+})

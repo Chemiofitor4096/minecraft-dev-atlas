@@ -16,6 +16,8 @@ import { dumpPath, metaPath } from './paths.js'
  * @property {string} pluginVersion
  * @property {string | undefined} jarVersion
  * @property {string} sourceHash
+ * @property {string | undefined} taskPath
+ * @property {string | undefined} gradleRoot
  * @property {string} exportedAt
  * @property {string} generatedAt
  * @property {Record<string, any>} env

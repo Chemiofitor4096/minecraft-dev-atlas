@@ -11,7 +11,7 @@ export function mcDataQueryTool(atlas) {
     name: 'mc_data_query',
     description: `Query the cached Minecraft data dump: digest first, then drill into one registry, tag or recipe by filter. Read-only and never starts the server; a missing dump means calling mc_data_dump first.`,
     parameters: {
-      root: { type: 'string', description: 'Project directory; defaults to the current workspace' },
+      root: { type: 'string', description: 'Project directory; defaults to the current workspace. For a module of a multi-module build, pass the root returned by mc_data_dump' },
       kind: {
         type: 'string',
         enum: ['digest', 'registry', 'tag', 'recipe'],

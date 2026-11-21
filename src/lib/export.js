@@ -17,7 +17,7 @@ import { AtlasError, asAtlasError, fail } from './errors.js'
 import { cachedMeta, readDumpText, writeMeta } from './cache.js'
 import { jarPath, readJarVersion } from './jar.js'
 import { dumpPath } from './paths.js'
-import { looksLikeGradleProject, sourceFingerprint } from './project.js'
+import { findGradleRoot, looksLikeGradleProject, sourceFingerprint } from './project.js'
 
 /** 一次导出的总预算：构建 + 启动 + 取数 + 写盘。 */
 export const DEFAULT_TIMEOUT_MS = 180_000
@@ -51,14 +51,17 @@ export async function exportDump(deps, args = {}) {
   const sections = normalizeSections(args.sections)
   let taskPath = normalizeTaskPath(args.taskPath)
 
-  // 会话开在工作区根上（C:\Projects 这类）时，root 不是工程本身。用 starter 的工程视图
-  // 找到唯一的可导出工程——不猜：找到多个就报出来，让调用方用 root 指明。
-  if (!looksLikeGradleProject(root) && (args.root === undefined || args.root === '')) {
-    const resolved = await resolveWorkspaceProject(mcdev, args.workspace ?? root)
-    if (resolved !== undefined) {
-      root = resolved.root
-      if (args.taskPath === undefined || args.taskPath === '') taskPath = resolved.taskPath
-    }
+  // 多模块：聚合根本身不是可启动的工程，任务在子模块里。先让 starter 的工程视图决定
+  // "哪个模块、哪个服务端任务"——不猜：多个模块都有 runServer 时报出来，让调用方指明。
+  const target = await resolveExportTarget(mcdev, {
+    root,
+    workspace: args.workspace,
+    taskPath: args.taskPath,
+  })
+  let gradleRoot = target?.gradleRoot
+  if (target !== undefined) {
+    root = target.root
+    taskPath = target.taskPath
   }
 
   if (!looksLikeGradleProject(root)) {
@@ -66,6 +69,7 @@ export async function exportDump(deps, args = {}) {
   }
 
   const fingerprint = await sourceFingerprint(root)
+  gradleRoot = gradleRoot ?? fingerprint.gradleRoot
 
   if (args.refresh !== true) {
     const cached = await cachedMeta(root, fingerprint.hash)
@@ -73,6 +77,8 @@ export async function exportDump(deps, args = {}) {
       /** @type {Record<string, any>} */
       const value = {
         path: cached.path,
+        root,
+        taskPath,
         cached: true,
         schema: cached.schema,
         env: cached.env,
@@ -103,13 +109,25 @@ export async function exportDump(deps, args = {}) {
   const out = dumpPath(root)
   await fs.mkdir(dirname(out), { recursive: true })
 
-  // 正在跑就不导：一个工程只允许一个实例，第二条 runServer 会被 starter 直接拒掉
-  const instances = await safeList(mcdev, { root, workspace: args.workspace })
+  // 多模块的模块共享 Gradle 根下的 run/ 与端口：starter 的单实例锁按 root 记，
+  // 两个模块会各跑一个服务端。这里按 Gradle 根再拦一层，只有同构建的实例才算冲突。
+  const instances = await safeList(mcdev, {})
   const running = instances.find((entry) => entry?.status === 'starting' || entry?.status === 'running')
   if (running !== undefined) {
-    fail('ALREADY_RUNNING', `该工程已有运行中的实例 ${running.id}（${running.taskPath}）；请先停止该实例，再执行导出。`, {
-      launch: { id: running.id, status: running.status, taskPath: running.taskPath },
-    })
+    const runningRoot = typeof running.root === 'string' && running.root !== '' ? running.root : root
+    const runningGradleRoot = await findGradleRoot(runningRoot)
+    if (samePath(runningRoot, root) || samePath(runningGradleRoot, gradleRoot)) {
+      fail(
+        'ALREADY_RUNNING',
+        samePath(runningRoot, root)
+          ? `该工程已有运行中的实例 ${running.id}（${running.taskPath}）；请先停止该实例，再执行导出。`
+          : `同一 Gradle 工程已有实例 ${running.id}（模块 ${runningRoot}，${running.taskPath}）在运行；模块共享运行目录与端口，请先停止该实例。`,
+        {
+          launch: { id: running.id, status: running.status, taskPath: running.taskPath, root: runningRoot },
+          gradleRoot,
+        },
+      )
+    }
   }
 
   const agentTimeoutMs = clamp(timeoutMs - AGENT_TIMEOUT_MARGIN_MS, AGENT_TIMEOUT_MIN_MS, AGENT_TIMEOUT_MAX_MS)
@@ -189,6 +207,8 @@ export async function exportDump(deps, args = {}) {
     pluginVersion: deps.version,
     jarVersion,
     sourceHash: fingerprint.hash,
+    taskPath,
+    gradleRoot,
     exportedAt: new Date().toISOString(),
     generatedAt: dump.generatedAt,
     env: dump.env,
@@ -208,6 +228,8 @@ export async function exportDump(deps, args = {}) {
   const partial = record?.timedOut === true || dump.errors.length > 0
   return {
     path: dumpFile.path,
+    root,
+    taskPath,
     cached: false,
     schema: dump.schema,
     env: dump.env,
@@ -236,14 +258,25 @@ export async function exportDump(deps, args = {}) {
  * @param {string | undefined} workspace
  * @returns {Promise<{ root: string, taskPath: string } | undefined>}
  */
-async function resolveWorkspaceProject(mcdev, workspace) {
+/**
+ * 用 starter 的工程视图解析"从哪个模块、跑哪个服务端任务"。
+ *
+ * - 简单工程：命中 root，任务就是它的服务端目标；
+ * - 多模块聚合根：root 本身没有可启动任务，落到唯一的服务端模块；
+ * - 多个模块都有 runServer：不猜，列出候选，让调用方用 root 或 taskPath 指定。
+ * @param {Record<string, any>} mcdev
+ * @param {{ root: string, workspace?: string, taskPath?: string }} input
+ * @returns {Promise<{ root: string, taskPath: string, gradleRoot?: string } | undefined>}
+ */
+async function resolveExportTarget(mcdev, input) {
   if (typeof mcdev?.projects !== 'function') return undefined
   let scanned
   try {
     // starter 的 projects() 只用 workspace 解析相对 root，不会拿它当扫描根：
-    // 这里把工作区目录显式作为 root 传下去。
+    // 这里把绝对 root 一起传下去。
     scanned = await mcdev.projects({
-      ...(typeof workspace === 'string' && workspace !== '' ? { root: workspace, workspace } : {}),
+      root: input.root,
+      ...(typeof input.workspace === 'string' && input.workspace !== '' ? { workspace: input.workspace } : {}),
     })
   } catch {
     return undefined
@@ -252,13 +285,56 @@ async function resolveWorkspaceProject(mcdev, workspace) {
     .map((project) => ({ project, target: serverTargetOf(project) }))
     .filter((entry) => entry.target !== undefined && typeof entry.project?.root === 'string')
   if (candidates.length === 0) return undefined
-  if (candidates.length === 1) {
-    return { root: candidates[0].project.root, taskPath: candidates[0].target.taskPath }
+
+  if (typeof input.taskPath === 'string' && input.taskPath !== '') {
+    const byTask = candidates.find((entry) => entry.target.taskPath === input.taskPath)
+    if (byTask !== undefined) return targetOf(byTask)
+    fail('NO_RUN_TARGET', `没有找到服务端任务 ${input.taskPath}；可用的服务端任务：${formatCandidates(candidates)}。`)
   }
+
+  const exact = candidates.find((entry) => samePath(entry.project.root, input.root))
+  if (exact !== undefined) return targetOf(exact)
+  if (candidates.length === 1) return targetOf(candidates[0])
   fail(
     'NO_RUN_TARGET',
-    `工作区 ${scanned?.root ?? workspace ?? ''} 中存在多个可导出的工程（${candidates.length} 个）：${candidates.slice(0, 8).map((entry) => entry.project.root).join('、')}${candidates.length > 8 ? '…' : ''}。请通过 root 指定其中一个。`,
+    `${input.root} 下存在多个可导出的服务端模块（${candidates.length} 个）：${formatCandidates(candidates)}。请用 root 指定其中一个模块，或用 taskPath 指定服务端任务。`,
   )
+}
+
+/**
+ * @param {{ project: Record<string, any>, target: { taskPath: string } }} entry
+ * @returns {{ root: string, taskPath: string, gradleRoot?: string }}
+ */
+function targetOf(entry) {
+  /** @type {{ root: string, taskPath: string, gradleRoot?: string }} */
+  const target = { root: entry.project.root, taskPath: entry.target.taskPath }
+  if (typeof entry.project.gradleRoot === 'string' && entry.project.gradleRoot !== '') {
+    target.gradleRoot = entry.project.gradleRoot
+  }
+  return target
+}
+
+/**
+ * @param {Array<{ project: Record<string, any>, target: { taskPath: string } }>} candidates
+ * @returns {string}
+ */
+function formatCandidates(candidates) {
+  const shown = candidates
+    .slice(0, 8)
+    .map((entry) => `${entry.project.root}（${entry.target.taskPath}）`)
+    .join('、')
+  return `${shown}${candidates.length > 8 ? '…' : ''}`
+}
+
+/**
+ * 路径比较：Windows 大小写不敏感，统一 resolve 后按小写比。
+ * @param {string} left
+ * @param {string} right
+ * @returns {boolean}
+ */
+function samePath(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string' || left === '' || right === '') return false
+  return resolve(left).toLowerCase() === resolve(right).toLowerCase()
 }
 
 /**

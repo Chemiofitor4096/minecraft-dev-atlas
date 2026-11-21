@@ -68,6 +68,23 @@ nearby Minecraft project.
 Both tools are mounted per step: when the workspace contains no Gradle project they are absent from
 the schema and cannot be invoked.
 
+### Multi-module builds
+
+The aggregator root (the directory containing `settings.gradle`) usually has no `runServer` task;
+the server task lives in a subproject. `mc_data_dump` resolves the aggregator through
+`ctx.mcdev.projects()`:
+
+- with exactly one server module, its `:module:runServer` is used automatically;
+- with several exportable modules it does not guess: it returns `NO_RUN_TARGET` and lists the
+  candidates, so the caller can point `root` at a module or name a `taskPath`;
+- the dump result carries `root` and `taskPath`; use that `root` when querying the module's data;
+- the panel's project selector lists the modules of the current Gradle build, including nested
+  modules such as `modules/core`;
+- `sourceHash` is computed per Gradle root, so a change in a common module or a root build script
+  invalidates the cache of every module in that build;
+- only one export may run per Gradle build: modules share the run directory and port, so a sibling
+  module that is already running returns `ALREADY_RUNNING`.
+
 ## Data location
 
 ```
@@ -76,9 +93,9 @@ $DSH_HOME/mc-dev-starter/profiles/<profile>/data/<projectKey>/meta.json
 ```
 
 The plugin follows the starter's state directory convention: it creates only its own `data/`
-subdirectory and writes no files into the user's project. `sourceHash` is computed from the names,
-sizes and modification times of the build files and `src/**`; an unchanged hash returns the cache
-(`cached: true`).
+subdirectory and writes no files into the user's project. `sourceHash` is computed per Gradle root
+from the names, sizes and modification times of the root and module build files and all `src/**`;
+an unchanged hash returns the cache (`cached: true`).
 
 ## Dump format
 

@@ -61,6 +61,21 @@ npm run build
 
 两个工具均按步挂载：工作区中不存在 Gradle 工程时，它们不进入 schema，也无法调用。
 
+### 多模块工程
+
+聚合根（`settings.gradle` 所在目录）通常没有 `runServer` 任务，服务端任务位于子模块中。
+`mc_data_dump` 通过 `ctx.mcdev.projects()` 把聚合根解析到服务端模块：
+
+- 只有一个服务端模块时，自动使用它的 `:module:runServer`；
+- 多个模块都可导出时不做猜测：返回 `NO_RUN_TARGET` 并列出候选，调用方用 `root` 指定模块，
+  或用 `taskPath` 指定任务；
+- 导出结果包含 `root` 与 `taskPath`；查询该模块的数据时，以返回的 `root` 为准；
+- 面板的工程选择器会列出当前 Gradle 构建中的模块（包括 `modules/core` 这类嵌套模块）；
+- `sourceHash` 以 Gradle 根为单位计算，修改 common 模块或根构建脚本会使同一构建下
+  所有模块的缓存失效；
+- 同一 Gradle 构建同时只允许一个导出实例：模块共享运行目录与端口，兄弟模块在运行时
+  返回 `ALREADY_RUNNING`。
+
 ## 数据存放位置
 
 ```
@@ -69,8 +84,8 @@ $DSH_HOME/mc-dev-starter/profiles/<profile>/data/<projectKey>/meta.json
 ```
 
 沿用 starter 的状态目录约定，仅创建本插件自己的 `data/` 子目录，不向用户工程写入任何文件。
-`sourceHash` 由构建文件与 `src/**` 的文件名、大小和修改时间计算；哈希相同时直接返回缓存
-（`cached: true`）。
+`sourceHash` 以 Gradle 根为单位，由根与各模块的构建文件、所有 `src/**` 的文件名、大小与
+修改时间计算；哈希相同时直接返回缓存（`cached: true`）。
 
 ## dump 格式
 

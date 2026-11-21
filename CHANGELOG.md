@@ -84,6 +84,22 @@
 - 面板表格可随侧栏高度收缩（`flex: 1 1 auto` + `min-height: 0`），页脚不再被挤出；
   标题优先显示模组名（`modName`），目录名与路径放在悬停提示里。
 
+### 多模块工程（同日修订）
+
+- 工具解析：`mc_data_dump` 通过 `ctx.mcdev.projects()` 把聚合根落到服务端模块。只有一个服务端模块时
+  自动使用 `:module:runServer`；多个模块时返回 `NO_RUN_TARGET` 并列出候选，不做猜测；显式
+  `taskPath` 会解析到对应模块。
+- 导出结果与 meta 带 `root` / `taskPath`；查询模块数据时以返回的 `root` 为准。
+- 缓存：`sourceHash` 改为按 Gradle 根计算（根与各模块的构建文件、所有 `src/**`）。共享模块或根
+  构建脚本变化会使同一构建下所有模块的缓存失效；meta 记录 `taskPath` 与 `gradleRoot`。
+- 并发：在 starter 按 root 的单实例锁之上，再按 Gradle 根拦截兄弟模块（模块共享 `run/` 与端口）。
+- 面板：入口与工程选择器把 `gradleRoot === cwd` 的嵌套模块算作当前工作区；工程摘要带 `gradleRoot`。
+- 测试新增 6 个多模块用例（聚合根解析、多候选、显式 taskPath、兄弟模块并发、共享模块失效、
+  嵌套模块选择），合计 126 个。
+- 真机检查：AnnoCore（6 个工程、4 个服务端模块）的聚合根返回 4 个候选；显式
+  `:anno-mod-neoforge:runServer` 与模块 root 都解析到 `anno-mod-neoforge`；该模块指纹 71 个文件、
+  约 33 ms。
+
 ### 测试
 
 - `node --test`：120 个测试，覆盖引擎、契约、路径、工程指纹、工具与挂载、导出编排（缓存/失败/

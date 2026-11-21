@@ -129,7 +129,7 @@ function projectSummary(project) {
       label: target.label,
     })),
   }
-  for (const key of ['mcVersion', 'loaderVersion', 'modName', 'modId']) {
+  for (const key of ['mcVersion', 'loaderVersion', 'modName', 'modId', 'gradleRoot']) {
     if (typeof project[key] === 'string' && project[key] !== '') view[key] = project[key]
   }
   return view

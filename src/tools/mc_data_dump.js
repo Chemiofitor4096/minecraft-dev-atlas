@@ -11,7 +11,7 @@ export function mcDataDumpTool(atlas) {
     name: 'mc_data_dump',
     description: `Export Minecraft registries, tags and recipe index from a headless dev server into a cached dump. It starts runServer itself (30-60s) and reuses the dump while the project is unchanged, so do not start the server yourself.`,
     parameters: {
-      root: { type: 'string', description: 'Project directory; defaults to the current workspace' },
+      root: { type: 'string', description: 'Project directory; defaults to the current workspace. For a multi-module build, point at the aggregator (a single server module is detected) or at the module itself' },
       sections: {
         type: 'array',
         description: 'Sections to export; default all three',
@@ -19,7 +19,7 @@ export function mcDataDumpTool(atlas) {
       },
       timeoutMs: { type: 'number', description: 'Cap for build + boot + export in ms; default 180000. The agent writes what it has before this fires' },
       refresh: { type: 'boolean', description: 'Ignore the cache and export again (after changing mod code or datapacks)' },
-      taskPath: { type: 'string', description: 'Gradle server task; default runServer, and :module:runServer for multi-module projects' },
+      taskPath: { type: 'string', description: 'Gradle server task; default runServer. For a multi-module build, :module:runServer selects that module automatically' },
     },
     output: {
       schema: {
@@ -27,6 +27,8 @@ export function mcDataDumpTool(atlas) {
         additionalProperties: false,
         properties: {
           path: { type: 'string', required: true },
+          root: { type: 'string' },
+          taskPath: { type: 'string' },
           cached: { type: 'boolean', required: true },
           schema: { type: 'integer', required: true },
           env: { type: 'object', required: true, additionalProperties: true },

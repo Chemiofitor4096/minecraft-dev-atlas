@@ -78,6 +78,10 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 | `ctx.mcdev.projects({ workspace })` 扫的是宿主默认目录 | starter 的 `resolveRoot` 是 `requested ?? resolveRoot()`，`workspace` 只解析**相对 root** | 调用时把绝对的 `root` 一起传下去（`{ root: workspace, workspace }`） |
 | 面板导出打到工作区根而不是工程 | 只传 workspace 时 atlas 把 workspace 当 root | 面板传 `root` + `taskPath`（`kind=server`）；工具在"工作区根不是工程"时用 projects 回退到唯一候选 |
 | 客户端 fetch 被 CORS 拒 | 用了绝对 origin | 桌面外壳页面是 `dsh-app://app/`，必须 `/atlas/api/...` 相对路径 |
+| 多模块聚合根找不到 `runServer` | 任务在子模块，聚合根只有 `settings.gradle` | 先用 `mcdev.projects({ root })` 解析到服务端模块；唯一模块自动用，多个候选列出、不猜 |
+| 改了 common 模块，模块缓存还命中 | 指纹只算模块自身 | `sourceFingerprint` 以 `findGradleRoot` 为界，覆盖整棵构建的 build 文件与 `src/**` |
+| 两个模块同时起服务端 | starter 的单实例锁按 root，模块 root 不同 | 导出前用 `mcdev.list()` 按 `gradleRoot` 比较；兄弟模块在跑报 `ALREADY_RUNNING` |
+| 嵌套模块（`modules/core`）入口不显示 | 入口只认 cwd 与直接子目录 | `gradleRoot === cwd` 的模块也算当前工作区 |
 
 其他约定：
 
@@ -89,7 +93,8 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
   判不出来按可见处理。判定按 cwd 缓存 60 秒，导出成功后清缓存。
 - **返回值必须是无损 JSON**：不放 `undefined`，可缺的字段就不放（不要用 null 占位）。
 - **错误必须能指导下一步**：每个失败码带 launch 记录与日志尾巴（`export.js` 的 `tail()`）。
-- **一个工程只允许一个实例**：导出前先 `mcdev.list`，有 running 就报 `ALREADY_RUNNING`，不排队。
+- **一个工程只允许一个实例**：导出前先 `mcdev.list`，有 running 就报 `ALREADY_RUNNING`，不排队；
+  多模块再按 `gradleRoot` 拦一层，避免兄弟模块共享 `run/` 与端口。
 - **dump 永远不进上下文**：查询默认 50 条、上限 200，摘要先给 `digest`。
 - **不 import starter 的文件**：两包独立发版，唯一通道是 `ctx.mcdev` 的四个方法。
 
@@ -140,9 +145,10 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
 - **面板跟当前会话**：`DataButton` 与 `DataTab` 都从 session 标准 props 取 cwd（`sessionId` +
   `useSessions`），喂 `workspaceStore`；切会话先清空再识别。位置：`src/client/lib/workspace.js`
   （无 React，可在 Node 里测） + `useWorkspace.js`。
-- **入口判据**：`hasNearbyMcProject(projects, cwd)`（cwd 或直接子目录内、`kind != unknown`）才显示
-  「数据」按钮；`C:\Projects\minecraft-dev-starter` 的 `templates/*` 与 `test/*` 夹具不再让入口常驻。
-  老 starter（没有 `ctx.mcdev.projects()`）或识别异常时退回"总是显示"。
+- **入口判据**：`hasNearbyMcProject(projects, cwd)`（cwd 本身、直接子目录，或 `gradleRoot === cwd`
+  的嵌套模块；`kind != unknown`）才显示「数据」按钮；`C:\Projects\minecraft-dev-starter` 的
+  `templates/*` 与 `test/*` 夹具不再让入口常驻。老 starter（没有 `ctx.mcdev.projects()`）或识别异常时
+  退回"总是显示"。
 - **工程选择**：`/atlas/api/data.projects` 走 `ctx.mcdev.projects()`；面板按 cwd → 附近能跑服务端的
   → 第一个的顺序默认；多工程给选择器；导出传 `root` + `taskPath`。
 - **starter 语义坑**：`projects.scan` 的 `workspace` 只解析相对 root；服务调用必须传绝对 `root`，
@@ -153,6 +159,20 @@ node scripts/e2e-export.mjs C:\Projects\Test  # 走宿主路径的真机导出
   14 秒完成、`exitCode 0`、计数与真机一致；服务端 client bundle 里包含 `data.projects`、
   `panel.noProject`、`hasNearbyMcProject`。
 - 合计 120 个测试全绿。
+
+### 多模块工程（2026-11-21 修订，通过）
+
+- 解析：`resolveExportTarget` 走 `ctx.mcdev.projects({ root })`。简单工程命中自身；聚合根只有一个
+  服务端模块时落到模块；多个时 `NO_RUN_TARGET` 列出 `root（:module:runServer）`；显式 `taskPath`
+  解析到对应模块。
+- 指纹：`findGradleRoot` 向上找 `settings.gradle(.kts)`；`sourceFingerprint` 遍历整个构建根，
+  收所有层级的 build 文件与 `src/**`，排除 `build/.gradle/run/out/.git/node_modules/.idea`，上限 5000。
+- 并发：`mcdev.list()` 返回的所有活跃实例按 `findGradleRoot(instance.root)` 与目标 `gradleRoot` 比较，
+  同构建即 `ALREADY_RUNNING`。
+- 面板：`gradleRoot === cwd` 的模块进入 `nearbyMcProjects`；`projectSummary` 带 `gradleRoot`。
+- 真机检查（不启动服务端）：AnnoCore 聚合根 → 4 个候选；显式 taskPath 与模块 root → 均解析到
+  `anno-mod-neoforge`；模块指纹 71 个文件 / 33 ms。
+- 测试：126 个全绿（新增 6 个多模块用例）。未跑完整的 AnnoCore 服务端导出（会拉依赖，留给真机面板）。
 
 ### 面板界面（2026-11-21 修订）
 

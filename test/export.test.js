@@ -84,6 +84,8 @@ test('导出成功：落盘 dump + meta，返回计数与 launch', async (t) => 
 
   const value = await exportDump(deps, { root: project })
   assert.equal(value.cached, false)
+  assert.equal(value.root, project)
+  assert.equal(value.taskPath, 'runServer')
   assert.equal(value.path, dumpPath(project))
   assert.equal(value.counts.registries, 7)
   assert.equal(value.counts.byRegistry['minecraft:item'], 4)
@@ -333,10 +335,157 @@ test('工作区里有多个可导出工程 → NO_RUN_TARGET 并列出候选', a
     () => exportDump(deps, { workspace }),
     (error) => {
       assert.equal(error.code, 'NO_RUN_TARGET')
-      assert.match(error.message, /多个可导出的工程/)
+      assert.match(error.message, /多个可导出的服务端模块/)
       assert.match(error.message, /other/)
       return true
     },
   )
   assert.equal(fake.launchCalls.length, 0)
+})
+test('多模块聚合根只有一个服务端模块：落到模块 root 与 :module:runServer', async (t) => {
+  const { logDir, fake, deps } = await setup(t)
+  const aggregator = await fakeProject(t, { 'settings.gradle': "include 'server'\n", 'build.gradle': '' })
+  const module = join(aggregator, 'server')
+  await mkdir(module, { recursive: true })
+  await writeFile(join(module, 'build.gradle'), "plugins { id 'java' }\n", 'utf8')
+  fake.setProjects(async () => ({
+    root: aggregator,
+    projects: [{
+      root: module,
+      name: 'server',
+      kind: 'mod',
+      loader: 'neoforge',
+      gradleRoot: aggregator,
+      runTargets: [{ taskPath: ':server:runServer', kind: 'server', mode: 'daemon' }],
+    }],
+  }))
+  fake.setLaunch(writingLaunch(logDir))
+
+  const value = await exportDump(deps, { root: aggregator, workspace: aggregator })
+  assert.equal(value.cached, false)
+  assert.equal(fake.launchCalls.length, 1)
+  assert.equal(fake.launchCalls[0].root, module)
+  assert.equal(fake.launchCalls[0].taskPath, ':server:runServer')
+  assert.equal(value.path, dumpPath(module))
+
+  const meta = JSON.parse(await readFile(metaPath(module), 'utf8'))
+  assert.equal(meta.taskPath, ':server:runServer')
+  assert.equal(meta.gradleRoot, aggregator)
+})
+
+test('多模块聚合根有多个服务端模块：列出候选，不启动', async (t) => {
+  const { fake, deps } = await setup(t)
+  const aggregator = await fakeProject(t, { 'settings.gradle': "include 'a', 'b'\n", 'build.gradle': '' })
+  const moduleA = join(aggregator, 'a')
+  const moduleB = join(aggregator, 'b')
+  for (const [dir, task] of [[moduleA, ':a:runServer'], [moduleB, ':b:runServer']]) {
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'build.gradle'), '', 'utf8')
+  }
+  fake.setProjects(async () => ({
+    root: aggregator,
+    projects: [
+      { root: moduleA, name: 'a', kind: 'mod', loader: 'neoforge', gradleRoot: aggregator, runTargets: [{ taskPath: ':a:runServer', kind: 'server' }] },
+      { root: moduleB, name: 'b', kind: 'mod', loader: 'fabric', gradleRoot: aggregator, runTargets: [{ taskPath: ':b:runServer', kind: 'server' }] },
+    ],
+  }))
+
+  await assert.rejects(
+    () => exportDump(deps, { root: aggregator, workspace: aggregator }),
+    (error) => {
+      assert.equal(error.code, 'NO_RUN_TARGET')
+      assert.match(error.message, /多个可导出的服务端模块/)
+      assert.match(error.message, /:a:runServer/)
+      assert.match(error.message, /:b:runServer/)
+      return true
+    },
+  )
+  assert.equal(fake.launchCalls.length, 0)
+})
+
+test('显式 taskPath 在聚合根里选中对应模块', async (t) => {
+  const { logDir, fake, deps } = await setup(t)
+  const aggregator = await fakeProject(t, { 'settings.gradle': "include 'a', 'b'\n", 'build.gradle': '' })
+  const moduleA = join(aggregator, 'a')
+  const moduleB = join(aggregator, 'b')
+  for (const [dir, task] of [[moduleA, ':a:runServer'], [moduleB, ':b:runServer']]) {
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'build.gradle'), '', 'utf8')
+  }
+  fake.setProjects(async () => ({
+    root: aggregator,
+    projects: [
+      { root: moduleA, name: 'a', kind: 'mod', loader: 'neoforge', gradleRoot: aggregator, runTargets: [{ taskPath: ':a:runServer', kind: 'server' }] },
+      { root: moduleB, name: 'b', kind: 'mod', loader: 'fabric', gradleRoot: aggregator, runTargets: [{ taskPath: ':b:runServer', kind: 'server' }] },
+    ],
+  }))
+  fake.setLaunch(writingLaunch(logDir))
+
+  await exportDump(deps, { root: aggregator, workspace: aggregator, taskPath: ':b:runServer' })
+  assert.equal(fake.launchCalls[0].root, moduleB)
+  assert.equal(fake.launchCalls[0].taskPath, ':b:runServer')
+})
+
+test('同一 Gradle 根的兄弟模块在跑：ALREADY_RUNNING，不启动', async (t) => {
+  const { fake, deps } = await setup(t)
+  const aggregator = await fakeProject(t, { 'settings.gradle': "include 'a', 'b'\n", 'build.gradle': '' })
+  const moduleA = join(aggregator, 'a')
+  const moduleB = join(aggregator, 'b')
+  for (const dir of [moduleA, moduleB]) {
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'build.gradle'), '', 'utf8')
+  }
+  fake.setProjects(async () => ({
+    root: aggregator,
+    projects: [
+      { root: moduleA, name: 'a', kind: 'mod', loader: 'neoforge', gradleRoot: aggregator, runTargets: [{ taskPath: ':a:runServer', kind: 'server' }] },
+    ],
+  }))
+  fake.setList(async () => [{ id: 'launch-9', root: moduleB, taskPath: ':b:runServer', status: 'running' }])
+
+  await assert.rejects(
+    () => exportDump(deps, { root: moduleA, workspace: aggregator }),
+    (error) => {
+      assert.equal(error.code, 'ALREADY_RUNNING')
+      assert.match(error.message, /同一 Gradle 工程/)
+      assert.match(error.message, /launch-9/)
+      return true
+    },
+  )
+  assert.equal(fake.launchCalls.length, 0)
+})
+
+test('共享模块源码变化：模块缓存失效并重新导出', async (t) => {
+  const { logDir, fake, deps } = await setup(t)
+  const aggregator = await fakeProject(t, {
+    'settings.gradle': "include 'common', 'server'\n",
+    'build.gradle': '',
+    'common/src/main/java/Common.java': 'class Common { int a = 1; }\n',
+  })
+  const module = join(aggregator, 'server')
+  await mkdir(module, { recursive: true })
+  await writeFile(join(module, 'build.gradle'), '', 'utf8')
+  fake.setProjects(async () => ({
+    root: aggregator,
+    projects: [{
+      root: module,
+      name: 'server',
+      kind: 'mod',
+      loader: 'neoforge',
+      gradleRoot: aggregator,
+      runTargets: [{ taskPath: ':server:runServer', kind: 'server' }],
+    }],
+  }))
+  fake.setLaunch(writingLaunch(logDir))
+
+  const first = await exportDump(deps, { root: module, workspace: aggregator })
+  const cached = await exportDump(deps, { root: module, workspace: aggregator })
+  assert.equal(first.cached, false)
+  assert.equal(cached.cached, true)
+  assert.equal(fake.launchCalls.length, 1)
+
+  await writeFile(join(aggregator, 'common/src/main/java/Common.java'), 'class Common { int a = 2; long changed = 1L; }\n', 'utf8')
+  const afterChange = await exportDump(deps, { root: module, workspace: aggregator })
+  assert.equal(afterChange.cached, false)
+  assert.equal(fake.launchCalls.length, 2)
 })

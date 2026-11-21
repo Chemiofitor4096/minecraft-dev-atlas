@@ -34,7 +34,8 @@ export function serverTargetOf(project) {
 
 /**
  * 该看哪个工程：先认 cwd 本身，再在"附近"的工程里挑能跑服务端的，最后第一个。
- * "附近"（cwd 自身或直接子目录）优先，避免扫描深度里的模板/夹具抢走默认项。
+ * "附近"（cwd 自身、直接子目录、或同一 Gradle 构建的模块）优先，
+ * 避免扫描深度里的模板/夹具抢走默认项。
  * @param {Array<Record<string, any>> | undefined} projects
  * @param {string | undefined} cwd
  * @returns {Record<string, any> | undefined}
@@ -70,14 +71,22 @@ export function projectDepth(cwd, root) {
 }
 
 /**
- * 工作区里"近处"的 MC 工程：会话目录本身，或它的直接子目录。
- * 标题栏入口与面板都只认这一批——模板/夹具不算。
+ * 工作区里"近处"的 MC 工程：会话目录本身、它的直接子目录，或同一 Gradle 构建的模块。
+ *
+ * 最后一个条件是为多模块工程准备的：`settings.gradle` 把模块放在 `modules/core` 这类
+ * 嵌套目录时，模块根的深度大于 1，但它与 cwd 共享 `gradleRoot`，仍然属于当前工作区。
+ * 模板/夹具的 `gradleRoot` 是它们自己，因此不会被算进来。
  * @param {Array<Record<string, any>> | undefined} projects
  * @param {string | undefined} cwd
  */
 export function nearbyMcProjects(projects, cwd) {
   if (typeof cwd !== 'string' || cwd === '') return mcProjects(projects)
-  return mcProjects(projects).filter((project) => projectDepth(cwd, project.root) <= 1)
+  const wanted = normalizePath(cwd)
+  if (wanted === undefined) return mcProjects(projects)
+  return mcProjects(projects).filter((project) => {
+    if (projectDepth(cwd, project.root) <= 1) return true
+    return normalizePath(project.gradleRoot) === wanted
+  })
 }
 
 /** @param {Array<Record<string, any>> | undefined} projects @param {string | undefined} cwd */
