@@ -8,6 +8,9 @@
  *
  * 为什么版本必须相等：包升级了、jar 还是旧的，是最难查的一类问题
  * （插件看起来装了新版本，反射却在按旧映射表干活）。这里不一致就直接失败。
+ *
+ * 另外校验字节码主版本不高于 Java 17：agent 跑在游戏 JVM 里，这一点比包版本更容易出事——
+ * 按 21 编译的 jar 遇到 1.20.1 的 Java 17，premain 抛 UnsupportedClassVersionError，游戏直接起不来。
  * @module minecraft-dev-atlas/scripts/build-agent
  */
 
@@ -15,7 +18,7 @@ import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readJarManifest } from '../src/lib/jar.js'
+import { readJarManifest, readClassVersions, classVersionsAbove, MAX_CLASS_MAJOR } from '../src/lib/jar.js'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const agentDir = join(root, 'agent')
@@ -32,7 +35,7 @@ if (!args.has('--skip-build')) {
   const commandArgs = isWindows
     ? ['/d', '/s', '/c', 'gradlew.bat', 'jar', '--console=plain', '--no-daemon']
     : ['jar', '--console=plain', '--no-daemon']
-  console.log(`[build-agent] ${isWindows ? 'gradlew.bat' : './gradlew'} jar (JDK 21 required)`)
+  console.log(`[build-agent] ${isWindows ? 'gradlew.bat' : './gradlew'} jar (JDK 17+ required)`)
   const result = spawnSync(command, commandArgs, {
     cwd: agentDir,
     stdio: 'inherit',
@@ -64,5 +67,21 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
+// 字节码版本守卫：agent 跑在游戏 JVM 里，高于上限的 class 会让 premain 直接把游戏弄挂，
+// 而且症状（UnsupportedClassVersionError）看起来像"Atlas 没生效"，最难查。
+const tooNew = classVersionsAbove(readClassVersions(targetJar))
+if (tooNew.length > 0) {
+  const majors = [...new Set(tooNew.map((entry) => entry.major))].sort((left, right) => left - right)
+  console.error(
+    `[build-agent] 字节码版本过高：${tooNew.length} 个 class 是 major ${majors.join('/')}，`
+      + `上限是 ${MAX_CLASS_MAJOR}（Java ${MAX_CLASS_MAJOR - 44}）。\n`
+      + `  检查 agent/build.gradle.kts 的 options.release；最早出事的是：\n`
+      + tooNew.slice(0, 5).map((entry) => `  - ${entry.name} (${entry.major})`).join('\n'),
+  )
+  process.exit(1)
+}
+
 const bytes = readFileSync(targetJar).length
-console.log(`[build-agent] assets/mcdev-atlas.jar ${(bytes / 1024).toFixed(1)} KiB · version ${packageVersion} · schema 1`)
+console.log(
+  `[build-agent] assets/mcdev-atlas.jar ${(bytes / 1024).toFixed(1)} KiB · version ${packageVersion} · schema 1 · max class major ${MAX_CLASS_MAJOR}`,
+)

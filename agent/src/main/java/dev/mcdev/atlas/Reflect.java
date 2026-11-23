@@ -1,6 +1,7 @@
 package dev.mcdev.atlas;
 
 import java.lang.instrument.Instrumentation;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -77,6 +78,38 @@ public final class Reflect {
         return null;
     }
 
+    /**
+     * 只在**已经加载**的类里找一个名字，不触发任何类加载。
+     *
+     * 为什么不能用 {@code Class.forName} 做"这个类在不在"的判断：ModLauncher 在 mixin/事件
+     * 转换窗口里跑，此时 {@code Class.forName} 会真的去加载那个类，从而把转换链扯进来——
+     * 实测的后果是 Forge 的 {@code EventSubclassTransformer} 在算监听器列表时炸掉
+     * （{@code Error computing listener list for ServerStartedEvent}），整个服务端加载失败。
+     * 所以探测一律走"扫描已加载清单"这条路，它只读不写。
+     *
+     * @return 命中类的加载器；没找到返回 null
+     */
+    public static ClassLoader loadedClassLoader(Instrumentation instrumentation, String name) {
+        if (instrumentation == null) {
+            return null;
+        }
+        try {
+            for (Class<?> candidate : instrumentation.getAllLoadedClasses()) {
+                if (name.equals(candidate.getName())) {
+                    return candidate.getClassLoader();
+                }
+            }
+        } catch (Throwable ignored) {
+            // 拿不到清单就当没加载，由调用方按"做不到这个判断"处理
+        }
+        return null;
+    }
+
+    /** 已加载清单里有没有这个类（同样不触发加载）。 */
+    public static boolean isLoaded(Instrumentation instrumentation, String name) {
+        return loadedClassLoader(instrumentation, name) != null;
+    }
+
     /** 按首选加载器找类，失败再试上下文/本 jar 的加载器；找不到抛异常。 */
     public static Class<?> mustClass(String name, ClassLoader preferred) {
         Class<?> found = findClass(name, preferred);
@@ -87,8 +120,7 @@ public final class Reflect {
     }
 
     /** 找类；找不到返回 null（用于"这个运行时有没有这个类"这种判断）。 */
-    public static Class<?> findClass(String name, ClassLoader preferred) {
-        List<ClassLoader> candidates = new ArrayList<>();
+    public static Class<?> findClass(String name, ClassLoader preferred) {        List<ClassLoader> candidates = new ArrayList<>();
         if (preferred != null) {
             candidates.add(preferred);
         }
@@ -112,8 +144,7 @@ public final class Reflect {
     }
 
     /** 读静态字段。 */
-    public static Object staticValue(Class<?> owner, String field) {
-        try {
+    public static Object staticValue(Class<?> owner, String field) {        try {
             Field found = owner.getField(field);
             return found.get(null);
         } catch (Throwable error) {
@@ -131,9 +162,66 @@ public final class Reflect {
         }
     }
 
+    /**
+     * 读实例或静态字段（按名字找，不要求 public 可见性）。
+     *
+     * 为什么要有它：有些 getter 会碰客户端类（例如 {@code Item#getMaxStackSize} 在专用服务端
+     * 会去加载 {@code AbstractClientPlayer} 然后被判 dist 不符），而同一个值在字段里是安全的——
+     * 读字段不触发任何间接初始化。
+     */
+    public static Object field(Object target, String name) {
+        Class<?> owner = target instanceof Class<?> type ? type : target.getClass();
+        boolean isStatic = target instanceof Class<?>;
+        for (Class<?> current = owner; current != null; current = current.getSuperclass()) {
+            for (Field candidate : current.getDeclaredFields()) {
+                if (!candidate.getName().equals(name)) {
+                    continue;
+                }
+                try {
+                    if (!candidate.canAccess(isStatic ? null : target)) {
+                        candidate.setAccessible(true);
+                    }
+                    return candidate.get(isStatic ? null : target);
+                } catch (Throwable error) {
+                    throw new ReflectException("读不到字段 " + owner.getName() + "." + name + "：" + AgentLog.describe(error), error);
+                }
+            }
+        }
+        throw new ReflectException("找不到字段 " + owner.getName() + "." + name, null);
+    }
+
     /** 调静态方法。 */
     public static Object callStatic(Class<?> owner, String method, Object... args) {
         return invoke(owner, null, method, args);
+    }
+
+    /**
+     * 用构造器新建一个对象：按**参数个数**挑第一个能接住的构造器。
+     *
+     * 只给单参数场景用（例如 {@code new ItemStack(Item)}）——参数一多，按个数挑就会挑错，
+     * 那种情况应该显式写死参数类型。
+     *
+     * @return 新对象；类找不到或没有匹配的构造器时返回 null（不让可选字段把整段弄挂）
+     */
+    public static Object callConstructor(String className, ClassLoader loader, Object... args) {
+        Class<?> owner = findClass(className, loader);
+        if (owner == null) {
+            return null;
+        }
+        for (Constructor<?> candidate : owner.getConstructors()) {
+            if (candidate.getParameterCount() != args.length) {
+                continue;
+            }
+            try {
+                if (!candidate.canAccess((Object) null)) {
+                    candidate.setAccessible(true);
+                }
+                return candidate.newInstance(args);
+            } catch (Throwable ignored) {
+                // 换下一个签名相同的构造器
+            }
+        }
+        return null;
     }
 
     /** 调实例方法（target 不能是 Class）。 */

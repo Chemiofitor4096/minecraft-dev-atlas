@@ -33,7 +33,7 @@ is never placed in the model context:
 - a Gradle Minecraft mod project with a server run target (`runServer`);
 - v0.1 supports **NeoForge 1.21.x with Mojang mappings (mojmap)** only; without a matching adapter
   the plugin returns `ATLAS_UNSUPPORTED` instead of exporting incomplete data;
-- Node ≥ 20; JDK 21 is required only to build the agent jar.
+- Node ≥ 20; JDK 17 is required only to build the agent jar.
 
 ## Install (development)
 
@@ -117,7 +117,7 @@ src/                    host side (ESM, no build)
   tools/                mc_data_dump / mc_data_query with Chinese rendering
   lib/                  paths, sourceHash, dump cache, export orchestration, error codes
 engine/                 query engine (pure functions, zero dependencies): parseDump / indexDump / query / digest
-agent/                  Java agent (Gradle, JDK 21, zero runtime dependencies)
+agent/                  Java agent (Gradle, JDK 17, zero runtime dependencies)
   src/main/java/dev/mcdev/atlas/            skeleton: no game class names
   src/main/java/dev/mcdev/atlas/adapters/   adapters (NeoForge + mojmap): all reflection lives here
 assets/mcdev-atlas.jar  build output (gitignored, shipped in the npm package)
@@ -132,7 +132,7 @@ combination requires one class and one table entry.
 ```powershell
 node --test                     # engine, tools and export orchestration
 npm run build                   # build the agent jar, copy it to assets/, verify manifest and version
-node scripts/e2e-export.mjs C:\Projects\Test   # real export through the host path (needs JDK 21 and a server target)
+node scripts/e2e-export.mjs C:\Projects\Test   # real export through the host path (needs JDK 17+ and a server target)
 ```
 
 ## Status

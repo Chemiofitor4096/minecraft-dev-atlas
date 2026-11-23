@@ -29,7 +29,7 @@ starter 不依赖本插件；卸载本插件后，starter 的功能不受影响�
 - 一个具有服务端运行目标（`runServer`）的 Gradle Minecraft 模组工程；
 - v0.1 仅支持 **NeoForge 1.21.x + Mojang 官方映射（mojmap）**；缺少对应 adapter 时返回
   `ATLAS_UNSUPPORTED`，不会导出内容不完整的数据；
-- Node ≥ 20；仅在构建 agent jar 时需要 JDK 21。
+- Node ≥ 20；仅在构建 agent jar 时需要 JDK 17。
 
 ## 安装（开发期）
 
@@ -105,7 +105,7 @@ src/                    宿主侧（ESM，无需构建）
   tools/                mc_data_dump / mc_data_query 与中文渲染
   lib/                  路径、sourceHash、dump 缓存、导出编排、错误码
 engine/                 查询引擎（纯函数，零依赖）：parseDump / indexDump / query / digest
-agent/                  Java Agent（Gradle、JDK 21、零运行时依赖）
+agent/                  Java Agent（Gradle、JDK 17、零运行时依赖）
   src/main/java/dev/mcdev/atlas/            骨架：不包含任何游戏类名
   src/main/java/dev/mcdev/atlas/adapters/   适配器（NeoForge + mojmap）：所有反射调用集中于此
 assets/mcdev-atlas.jar  构建产物（已忽略，包含在 npm 包中）
@@ -119,7 +119,7 @@ Agent 的组织方式与 starter 一致：所有映射知识都封装在 adapter
 ```powershell
 node --test                     # 引擎、工具与导出编排
 npm run build                   # 构建 agent jar、复制到 assets/，并校验 manifest 与版本
-node scripts/e2e-export.mjs C:\Projects\Test   # 经宿主路径执行真实导出（需要 JDK 21 与服务端目标）
+node scripts/e2e-export.mjs C:\Projects\Test   # 经宿主路径执行真实导出（需要 JDK 17+ 与服务端目标）
 ```
 
 ## 状态
